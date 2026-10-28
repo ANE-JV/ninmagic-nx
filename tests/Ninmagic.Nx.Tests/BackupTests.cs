@@ -51,7 +51,7 @@ public static class BackupTests
             File.SetAttributes(nested, FileAttributes.Directory | FileAttributes.Archive);
             File.SetAttributes(Path.Combine(sourceRoot, "switch", "prueba.nro"), FileAttributes.Hidden | FileAttributes.ReadOnly | FileAttributes.Archive);
             var sourceBytes = await File.ReadAllBytesAsync(Path.Combine(sourceRoot, "switch", "prueba.nro"));
-            var service = new BackupService(fake, SimulatedMediaTest);
+            var service = new BackupService(fake);
 
             var manifest = await service.CreateAsync(source, backup, Quiet, CancellationToken.None);
             Check(File.Exists(Path.Combine(backup, "manifest.json")), "Manifiesto terminado");
@@ -128,7 +128,7 @@ public static class BackupTests
             var flushRoot = Path.Combine(root, "flush-error-target");
             Directory.CreateDirectory(flushRoot);
             var flushFailure = new FakeDisks(source, target, flushRoot) { FailFinalFlush = true };
-            await ExpectThrowsAsync<IOException>(() => new BackupService(flushFailure, SimulatedMediaTest).RestoreAsync(backup, target, Quiet, CancellationToken.None));
+            await ExpectThrowsAsync<IOException>(() => new BackupService(flushFailure).RestoreAsync(backup, target, Quiet, CancellationToken.None));
             var flushStatus = await File.ReadAllTextAsync(Path.Combine(backup, "ultima-restauracion.json"));
             Check(flushStatus.Contains("error-destino-incompleto") && !flushStatus.Contains("completada-y-verificada"), "Un fallo del volcado final nunca informa de éxito");
             cases += 2;
@@ -148,11 +148,6 @@ public static class BackupTests
     }
 
     private static bool HasFlagValue(this int attrs, FileAttributes flag) => ((FileAttributes)attrs & flag) != 0;
-    private static Task<MediaTestResult> SimulatedMediaTest(Stream stream, long size, IProgress<WorkProgress> progress, CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-        return Task.FromResult(new MediaTestResult(size, 80, 90, DateTime.UtcNow, "Simulación de prueba"));
-    }
     private static void WriteSyntheticNand(Stream stream, uint emuSector)
     {
         var entries = new byte[128 * 128];

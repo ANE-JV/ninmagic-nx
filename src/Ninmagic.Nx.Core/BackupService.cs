@@ -8,15 +8,10 @@ namespace Ninmagic.Nx.Core;
 public sealed class BackupService
 {
     private readonly IDiskAccess disks;
-    private readonly Func<Stream, long, IProgress<WorkProgress>, CancellationToken, Task<MediaTestResult>> testMedia;
 
-    public BackupService(IDiskAccess disks) : this(disks, MediaTester.TestAsync) { }
-
-    // Only the test assembly can substitute the destructive capacity test with a simulated result.
-    internal BackupService(IDiskAccess disks, Func<Stream, long, IProgress<WorkProgress>, CancellationToken, Task<MediaTestResult>> testMedia)
+    public BackupService(IDiskAccess disks)
     {
         this.disks = disks ?? throw new ArgumentNullException(nameof(disks));
-        this.testMedia = testMedia ?? throw new ArgumentNullException(nameof(testMedia));
     }
 
     private const int BufferSize = 4 * 1024 * 1024;
@@ -120,7 +115,7 @@ public sealed class BackupService
         if (after.Count != inventory.Count || !after.SequenceEqual(inventory))
             throw new IOException("La tarjeta cambió durante la copia. No se completó la copia; cierra los programas que la utilizan y repite en una carpeta nueva.");
 
-        var manifest = new BackupManifest(1, "1.1.0", DateTime.UtcNow, source, layout.Data,
+        var manifest = new BackupManifest(1, "1.2.0", DateTime.UtcNow, source, layout.Data,
             layout.FileSystem, volume.Label, rawParts, files, excluded);
         ValidateManifest(manifest);
         await VerifyContentsAsync(backupFolder, manifest, progress, cancellationToken);
@@ -173,7 +168,7 @@ public sealed class BackupService
         return DiskLayout.Plan(manifest, target);
     }
 
-    public async Task<MediaTestResult> RestoreAsync(string backupFolder, DiskInfo target,
+    public async Task RestoreAsync(string backupFolder, DiskInfo target,
         IProgress<WorkProgress> progress, CancellationToken cancellationToken)
     {
         backupFolder = Path.GetFullPath(backupFolder);
@@ -184,31 +179,14 @@ public sealed class BackupService
         ValidateDestination(manifest, target);
         var plan = DiskLayout.Plan(manifest, target);
         var statusPath = SafePaths.Resolve(backupFolder, "ultima-restauracion.json");
-        var mediaReportPath = SafePaths.Resolve(backupFolder, "ultima-prueba-tarjeta.json");
         await WriteStatusAsync(statusPath, "iniciada", target, null);
-        MediaTestResult mediaResult;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             using (var session = await disks.OpenTargetAsync(target, cancellationToken))
             {
             var stream = session.Stream;
-            await WriteMediaReportAsync(mediaReportPath, "iniciada", target, null, null);
-            try
-            {
-                // Test every advertised byte before recreating partitions, using the same locked device handle.
-                mediaResult = await testMedia(stream, target.Size, progress, cancellationToken);
-                if (mediaResult.BytesVerified != target.Size)
-                    throw new IOException("La prueba no verificó toda la capacidad de la tarjeta. La migración se ha bloqueado.");
-                await WriteMediaReportAsync(mediaReportPath, "capacidad-completa-verificada", target, mediaResult, null);
-            }
-            catch (Exception ex)
-            {
-                await WriteMediaReportAsync(mediaReportPath, ex is OperationCanceledException ? "cancelada" : "fallida", target, null, ex);
-                throw;
-            }
             cancellationToken.ThrowIfCancellationRequested();
-            progress.Report(new("Capacidad verificada", $"{mediaResult.BytesVerified / 1_000_000_000.0:0.00} GB comprobados; escritura {mediaResult.WriteMiBPerSecond:0.0} MiB/s; lectura {mediaResult.ReadMiBPerSecond:0.0} MiB/s. {mediaResult.Warning}", 1, 1));
             progress.Report(new("Preparando destino", "Creando particiones en la tarjeta de destino", 0, 1));
             cancellationToken.ThrowIfCancellationRequested();
             DiskLayout.WriteMbr(stream, plan);
@@ -299,7 +277,6 @@ public sealed class BackupService
             } // Dispose performs the final volume flush; success is recorded only after it succeeds.
             await WriteStatusAsync(statusPath, "completada-y-verificada", target, null);
             progress.Report(new("Migración verificada", "Expulsa la tarjeta de forma segura y comprueba el arranque en la misma consola. Conserva la original y la copia.", 1, 1));
-            return mediaResult;
         }
         catch (Exception ex)
         {
@@ -537,26 +514,4 @@ public sealed class BackupService
         catch (InvalidDataException) { }
     }
 
-    private static async Task WriteMediaReportAsync(string path, string state, DiskInfo target, MediaTestResult? result, Exception? error)
-    {
-        try
-        {
-            SafePaths.RejectReparseAncestors(path);
-            var mediaError = error as MediaTestException;
-            var text = JsonSerializer.Serialize(new
-            {
-                state,
-                timeUtc = DateTime.UtcNow,
-                target = new { target.Number, target.FriendlyName, target.SerialNumber, target.UniqueId, target.Size },
-                result,
-                error = error?.Message,
-                phase = mediaError?.Phase,
-                byteOffset = mediaError?.ByteOffset
-            }, JsonOptions);
-            await File.WriteAllTextAsync(path, text, CancellationToken.None);
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
-        catch (InvalidDataException) { }
-    }
 }

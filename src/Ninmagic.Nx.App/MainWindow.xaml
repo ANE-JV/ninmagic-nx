@@ -13,7 +13,7 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
           <TextBlock Text="MÁS CAPACIDAD.&#x0a;LOS MISMOS DATOS." FontWeight="Bold" FontSize="21" LineHeight="29" Margin="0,0,0,25"/>
           <TextBlock Text="01  Guarda tu tarjeta" FontWeight="SemiBold" Foreground="{StaticResource Accent}"/><TextBlock Text="Conecta la microSD original. Guarda una copia completa en un disco del PC." Margin="0,7,0,22" Foreground="{StaticResource Muted}"/>
-          <TextBlock Text="02  Prueba la nueva" FontWeight="SemiBold" Foreground="{StaticResource Accent}"/><TextBlock Text="Se escribe y relee toda la tarjeta antes de restaurar. Su contenido anterior se borrará." Margin="0,7,0,22" Foreground="{StaticResource Muted}"/>
+          <TextBlock Text="02  Restaura en la nueva" FontWeight="SemiBold" Foreground="{StaticResource Accent}"/><TextBlock Text="Conecta la microSD nueva. Se prepararán sus particiones y se restaurarán tus datos. Su contenido anterior se borrará." Margin="0,7,0,22" Foreground="{StaticResource Muted}"/>
           <TextBlock Text="03  Comprueba y juega" FontWeight="SemiBold" Foreground="{StaticResource Accent}"/><TextBlock Text="Se verifican los archivos y la emuMMC. Conserva la original hasta probar la nueva en la consola." Margin="0,7,0,25" Foreground="{StaticResource Muted}"/>
           <Border BorderBrush="{StaticResource BorderColor}" BorderThickness="0,1,0,0" Padding="0,18,0,0"><TextBlock Text="Windows 10/11 · 64 bits&#x0a;FAT32 y exFAT · MBR&#x0a;Lector USB / SD / MMC" FontSize="12" Foreground="{StaticResource Muted}"/></Border>
         </StackPanel></ScrollViewer>
@@ -46,6 +46,6 @@
         <Button x:Name="CancelButton" Grid.Column="1" Content="Cancelar" Click="Cancel_Click" IsEnabled="False" VerticalAlignment="Center" Margin="20,0,0,0"/>
       </Grid>
     </Border>
-    <DockPanel Grid.Row="4" Margin="2,13,2,0"><Button Content="Ayuda y compatibilidad" Click="Help_Click" Background="Transparent" Foreground="{StaticResource Muted}" Padding="0" FontSize="12" DockPanel.Dock="Left"/><Button Content="Abrir registros" Click="Logs_Click" Background="Transparent" Foreground="{StaticResource Muted}" Padding="15,0,0,0" FontSize="12" DockPanel.Dock="Right"/><TextBlock Text="1.1.0 · Prueba de capacidad completa" FontSize="12" Foreground="#798BA3" HorizontalAlignment="Right"/></DockPanel>
+    <DockPanel Grid.Row="4" Margin="2,13,2,0"><Button Content="Ayuda y compatibilidad" Click="Help_Click" Background="Transparent" Foreground="{StaticResource Muted}" Padding="0" FontSize="12" DockPanel.Dock="Left"/><Button Content="Abrir registros" Click="Logs_Click" Background="Transparent" Foreground="{StaticResource Muted}" Padding="15,0,0,0" FontSize="12" DockPanel.Dock="Right"/><TextBlock Text="1.2.0 · Datos copiados verificados" FontSize="12" Foreground="#798BA3" HorizontalAlignment="Right"/></DockPanel>
   </Grid>
 </Window>

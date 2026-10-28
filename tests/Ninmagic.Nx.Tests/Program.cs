@@ -14,8 +14,6 @@ try { total += await BackupTests.RunAsync(); }
 catch (Exception e) { failures++; Console.Error.WriteLine("FAIL backup suite\n" + e); }
 try { total += await TargetPolicyTests.RunAsync(); }
 catch (Exception e) { failures++; Console.Error.WriteLine("FAIL target policy suite\n" + e); }
-try { total += await MediaTesterTests.RunAsync(); }
-catch (Exception e) { failures++; Console.Error.WriteLine("FAIL media tester suite\n" + e); }
 Console.WriteLine($"RESULT: {total} checks; {failures} failures. All disk writes used simulated images only.");
 if (args.Contains("--inventory"))
 {

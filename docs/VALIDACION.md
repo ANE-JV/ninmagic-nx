@@ -1,14 +1,13 @@
-# Validación de ninmagic-nx 1.1.0
+# Validación de ninmagic-nx 1.2.0
 
-Fecha de preparación: 28 de octubre de 2026.
+Fecha de preparación: 29 de octubre de 2026.
 
 ## Comprobaciones realizadas
 
 - Compilación Release de los tres proyectos con .NET SDK 8.0.427: cero avisos y cero errores.
 - Publicación portable Windows x64 con runtime .NET incluido.
-- 110 comprobaciones de planificación, formato FAT32, MBR, CRC de la GPT interna, emuMMC estándar/antigua/múltiple, rutas, atributos, dispositivos excluidos, corrupción, cancelación y errores de vaciado final.
-- Prueba de capacidad con 18 escenarios de medios simulados: escritura completa antes de lectura, capacidad falsa por solapamiento, escrituras descartadas, corrupción en la última posición, lecturas parciales, fin prematuro, cancelación y fallo de vaciado.
-- Integración NTFS→FAT32 probada con manifiestos exFAT: rechazo de archivos demasiado grandes antes de escribir y bloqueo de particionado, formato y montaje si la prueba falla o queda incompleta. Los tests de integración sustituyen internamente la prueba de capacidad para evitar llenar imágenes grandes; la API pública siempre ejecuta el comprobador real.
+- Comprobaciones de planificación, formato FAT32, MBR, CRC de la GPT interna, emuMMC estándar/antigua/múltiple, rutas, atributos, dispositivos excluidos, corrupción, cancelación y errores de vaciado final.
+- Integración NTFS→FAT32 probada con manifiestos exFAT: rechazo de archivos individuales demasiado grandes antes de escribir, restauración de archivos y comprobación de que no se recorre toda la capacidad del destino. Las pruebas utilizan el constructor público del motor, sin sustitutos del comprobador de capacidad.
 - Adaptador Windows comprobado con archivos temporales: acceso al último sector sin lectura adelantada y liberación de todos los bloqueos aunque falle el cierre.
 - Migración completa simulada desde una tarjeta de 4 GiB a una de 8 GiB, con archivos temporales y una emuMMC RAW sintética de 64 MiB. Verificación de datos RAW, GPT, marcadores, INI, archivos y atributos tras la restauración.
 - Planificación con capacidades comerciales de 128 GB, 512 GB, 1 TB y 2 TB; rechazo de diseños incompatibles, solapamientos, capacidad insuficiente y sectores de 4 KiB.
@@ -51,6 +50,6 @@ dotnet run --project tools/RenderUi -c Release -- artifacts/ui
 
 El proyecto `tools/InspectCard` es un diagnóstico independiente y opcional. Recibe número de disco, tamaño exacto en bytes y ruta absoluta de un informe JSON nuevo en otro disco. Requiere administrador y solo abre el origen en lectura. No llama a formateo, restauración ni sesiones de escritura. Guarda una copia mínima de las referencias y el informe en el PC; estos resultados son privados y no deben añadirse al repositorio.
 
-La versión 1.1 añade la prueba destructiva completa del destino y la conversión NTFS a FAT32. La inspección de lectura de la tarjeta original se realizó con el motor anterior. Las copias de formato 1, incluidas las creadas por 1.0.0, siguen siendo compatibles.
+La versión 1.2 elimina la prueba destructiva completa de capacidad del destino y conserva la conversión NTFS a FAT32, la validación de la copia y la verificación de los datos restaurados. La inspección de lectura de la tarjeta original se realizó con el motor anterior. Las copias de formato 1, incluidas las creadas por 1.0.0, siguen siendo compatibles.
 
 `tools/BackupRunner` permite ejecutar el mismo motor de copias en segundo plano con una huella MBR, número de disco y capacidad exactos. Su adaptador rechaza obtener sesiones de escritura. Publica progreso JSON de forma atómica y solo marca `success` después de que `CreateAsync` devuelva una copia completa y verificada. El archivo `cancel.flag` junto al JSON solicita cancelación ordenada. Los informes, las copias y sus inventarios son privados y quedan fuera del repositorio.

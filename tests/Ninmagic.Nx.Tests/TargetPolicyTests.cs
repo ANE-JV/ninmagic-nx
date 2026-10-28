@@ -4,10 +4,10 @@ using Ninmagic.Nx.Core;
 
 namespace Ninmagic.Nx.Tests;
 
-/// <summary>Orchestration tests only. Every target is an in-memory, write-tracing simulated disk.</summary>
+/// <summary>Every device is an in-memory tracing stream; mounted files live in a unique test directory.</summary>
 public static class TargetPolicyTests
 {
-    private static readonly IProgress<WorkProgress> Quiet = new ImmediateProgress();
+    private static readonly IProgress<WorkProgress> Quiet = new ImmediateProgress(_ => { });
     private const long GiB = 1024L * 1024 * 1024;
 
     public static async Task<int> RunAsync()
@@ -17,16 +17,18 @@ public static class TargetPolicyTests
             512, "USB", false, false, false, "MBR", []);
         var target = source with
         {
-            Number = 91, SerialNumber = "TARGET", UniqueId = "TARGET-ID", Size = 16 * GiB, PartitionStyle = "GPT",
+            Number = 91, SerialNumber = "TARGET", UniqueId = "TARGET-ID", Size = 256 * GiB, PartitionStyle = "GPT",
             Volumes = [new(1, 1024 * 1024, GiB, "", "exFAT", ""), new(2, 2 * GiB, GiB, "", "nTfS", "")]
         };
         var payload = "Synthetic file to preserve while converting NTFS to FAT32."u8.ToArray();
         var file = new FileEntry("sample.bin", payload.Length, Convert.ToHexString(SHA256.HashData(payload)),
             (int)FileAttributes.Normal, DateTime.UtcNow, false);
         var manifest = new BackupManifest(1, "1.0.0", DateTime.UtcNow, source,
-            new(1, 0x07, 32768, (uint)(source.Size / 512 - 32768 - 2048)), "exFAT", "TEST", [], [file], []);
+            new(1, 0x07, 32768, (uint)(source.Size / 512 - 32768 - 2048)), "exFAT", "TEST", [],
+            [file, file with { Path = "z-last.bin" }], []);
         var converted = DiskLayout.Plan(manifest, target);
-        Check(converted.FileSystem == "FAT32" && converted.DataPartition.Type == 0x0C, "Any NTFS volume forces FAT32, including GPT and mixed case");
+        Check(converted.FileSystem == "FAT32" && converted.DataPartition.Type == 0x0C,
+            "Any NTFS volume forces FAT32, including GPT and mixed case");
         Check(manifest.FileSystem == "exFAT" && manifest.DataPartition.Type == 0x07, "Source manifest is immutable");
         var otherTarget = target with { Volumes = [] };
         Check(DiskLayout.Plan(manifest, otherTarget).FileSystem == "exFAT", "Non-NTFS destination preserves exFAT");
@@ -36,9 +38,11 @@ public static class TargetPolicyTests
 
         var oversized = manifest with { Files = [file with { Length = (long)uint.MaxValue + 1 }] };
         var oversizeError = ExpectThrows<InvalidDataException>(() => DiskLayout.Plan(oversized, target));
-        Check(oversizeError.Message.Contains("sample.bin") && oversizeError.Message.Contains("FAT32") && oversizeError.Message.Contains("No se puede conservar"), "Oversized files have explicit preservation error before writes");
+        Check(oversizeError.Message.Contains("sample.bin") && oversizeError.Message.Contains("FAT32") &&
+            oversizeError.Message.Contains("No se puede conservar"), "Oversized files have an explicit preservation error before writes");
         Check(DiskLayout.Plan(oversized, otherTarget).FileSystem == "exFAT", "Oversized exFAT file remains valid with non-NTFS target");
-        Check(DiskLayout.Plan(manifest with { Files = [file with { Length = uint.MaxValue }] }, target).FileSystem == "FAT32", "Exact FAT32 maximum file length is accepted");
+        Check(DiskLayout.Plan(manifest with { Files = [file with { Length = uint.MaxValue }] }, target).FileSystem == "FAT32",
+            "Exact FAT32 maximum file length is accepted");
         cases += 3;
 
         var root = Path.Combine(Path.GetTempPath(), "ninmagic-nx-policy-tests-" + Guid.NewGuid().ToString("N"));
@@ -47,93 +51,87 @@ public static class TargetPolicyTests
         {
             var backup = Path.Combine(root, "backup");
             Directory.CreateDirectory(Path.Combine(backup, "files"));
-            await File.WriteAllBytesAsync(Path.Combine(backup, "files", "sample.bin"), payload);
+            foreach (var entry in manifest.Files)
+                await File.WriteAllBytesAsync(Path.Combine(backup, "files", entry.Path), payload);
             await File.WriteAllTextAsync(Path.Combine(backup, "manifest.json"), JsonSerializer.Serialize(manifest));
 
-            var failed = new FakeDisks(target, Path.Combine(root, "failed-target"));
-            var failedTestCalled = false;
-            var failingService = new BackupService(failed, (stream, size, _, ct) =>
-            {
-                Check(ReferenceEquals(stream, failed.TargetStream) && failed.OpenCount == 1 && !failed.Disposed, "Media tester owns same active target session");
-                Check(size == target.Size, "Media test must cover entire reported capacity");
-                failedTestCalled = true;
-                stream.Position = 0;
-                stream.WriteByte(0x7D);
-                throw new MediaTestException("lectura", 4096, "Simulated counterfeit media");
-            });
-            var plan = await failingService.PlanAsync(backup, target, Quiet, CancellationToken.None);
-            Check(plan.FileSystem == "FAT32" && failed.OpenCount == 0 && !failedTestCalled, "Planning resolves NTFS policy without opening target");
-            await ExpectThrowsAsync<IOException>(() => failingService.RestoreAsync(backup, target, Quiet, CancellationToken.None));
-            Check(failedTestCalled && failed.TargetStream.WriteCalls == 1 && failed.TargetStream.Prefix[0] == 0x7D && failed.MountCount == 0 && failed.Disposed,
-                "Media failure stops MBR, formatter, mounting and restoration, disposing session");
-            using (var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(backup, "ultima-prueba-tarjeta.json"))))
-                Check(report.RootElement.GetProperty("state").GetString() == "fallida" && report.RootElement.GetProperty("result").ValueKind == JsonValueKind.Null &&
-                    report.RootElement.GetProperty("phase").GetString() == "lectura" && report.RootElement.GetProperty("byteOffset").GetInt64() == 4096,
-                    "Failed media report retains diagnostic phase and offset without a pass result");
-            Check((await File.ReadAllTextAsync(Path.Combine(backup, "ultima-restauracion.json"))).Contains("error-destino-incompleto"), "Media failure marks incomplete destination");
-            cases += 6;
+            var planned = new FakeDisks(target, Path.Combine(root, "planned-target"));
+            var plan = await new BackupService(planned).PlanAsync(backup, target, Quiet, CancellationToken.None);
+            Check(plan.FileSystem == "FAT32", "Planning resolves NTFS conversion");
+            Check(planned.OpenCount == 0 && planned.TargetStream.BytesWritten == 0 && planned.TargetStream.BytesRead == 0,
+                "Planning never opens or tests the destination");
+            cases += 2;
+
+            var corrupt = new FakeDisks(target, Path.Combine(root, "corrupt-target"));
+            var tampered = payload.ToArray();
+            tampered[0] ^= 0xff;
+            await File.WriteAllBytesAsync(Path.Combine(backup, "files", "sample.bin"), tampered);
+            await ExpectThrowsAsync<InvalidDataException>(() => new BackupService(corrupt).RestoreAsync(backup, target, Quiet, CancellationToken.None));
+            Check(corrupt.OpenCount == 0 && corrupt.TargetStream.BytesWritten == 0,
+                "Same-length SHA corruption is rejected before opening the destination");
+            await File.WriteAllBytesAsync(Path.Combine(backup, "files", "sample.bin"), payload);
+            cases += 2;
+
+            var success = new FakeDisks(target, Path.Combine(root, "success-target"));
+            var stages = new List<WorkProgress>();
+            await new BackupService(success).RestoreAsync(backup, target, new ImmediateProgress(stages.Add), CancellationToken.None);
+            Check(success.OpenCount == 1 && success.MountCount == 1 && success.Disposed && success.MountedPlan?.FileSystem == "FAT32",
+                "One target session converts NTFS to FAT32 and closes before success");
+            Check(success.TargetStream.Prefix[510] == 0x55 && success.TargetStream.Prefix[511] == 0xAA && success.TargetStream.Prefix[450] == 0x0C,
+                "The destination receives a FAT32 MBR");
+            Check(success.TargetStream.BytesWritten > 0 && success.TargetStream.BytesWritten < 128L * 1024 * 1024 && success.TargetStream.BytesRead == 0,
+                "File-only restore writes filesystem metadata without walking or rereading all 256 GiB");
+            foreach (var entry in manifest.Files)
+                Check((await File.ReadAllBytesAsync(Path.Combine(success.TargetRoot, entry.Path))).SequenceEqual(payload),
+                    "Every exFAT source file is preserved on the FAT32 destination");
+            Check(stages.Count(p => p.Stage == "Verificando archivos") >= manifest.Files.Count,
+                "Skipping the capacity scan must keep verification of the copied files");
+            Check(await StateIs(backup, "completada-y-verificada") && stages.Any(p => p.Stage == "Migración verificada"),
+                "Success is recorded only after verified restoration and target disposal");
+            Check(!File.Exists(Path.Combine(backup, "ultima-prueba-tarjeta.json")),
+                "Restoration must not claim a complete capacity test was performed");
+            cases += 8;
+
+            var writeFailure = new FakeDisks(target, Path.Combine(root, "write-error-target"));
+            writeFailure.TargetStream.FailWrites = true;
+            var failureStages = new List<WorkProgress>();
+            await ExpectThrowsAsync<IOException>(() => new BackupService(writeFailure).RestoreAsync(backup, target,
+                new ImmediateProgress(failureStages.Add), CancellationToken.None));
+            Check(writeFailure.OpenCount == 1 && writeFailure.MountCount == 0 && writeFailure.Disposed,
+                "A disk write failure stops before mounting and still closes the target session");
+            Check(await StateIs(backup, "error-destino-incompleto") && failureStages.All(p => p.Stage != "Migración verificada"),
+                "A write error replaces prior success with incomplete destination status");
+            cases += 3;
 
             var cancelled = new FakeDisks(target, Path.Combine(root, "cancelled-target"));
             using var cts = new CancellationTokenSource();
-            var cancellingService = new BackupService(cancelled, (stream, size, _, ct) =>
-            {
-                stream.WriteByte(0x7C);
-                cts.Cancel();
-                ct.ThrowIfCancellationRequested();
-                throw new Exception("Unreachable");
-            });
-            await ExpectThrowsAsync<OperationCanceledException>(() => cancellingService.RestoreAsync(backup, target, Quiet, cts.Token));
-            Check(cancelled.TargetStream.WriteCalls == 1 && cancelled.TargetStream.Prefix[0] == 0x7C && cancelled.MountCount == 0, "Cancelled media test cannot format or restore");
-            using (var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(backup, "ultima-prueba-tarjeta.json"))))
-                Check(report.RootElement.GetProperty("state").GetString() == "cancelada", "Cancelled media report retained");
-            cases += 2;
+            var cancelling = new ImmediateProgress(p => { if (p.Stage == "Preparando destino") cts.Cancel(); });
+            await ExpectThrowsAsync<OperationCanceledException>(() => new BackupService(cancelled).RestoreAsync(backup, target, cancelling, cts.Token));
+            Check(cancelled.TargetStream.BytesWritten == 0 && cancelled.MountCount == 0 && cancelled.Disposed,
+                "Cancellation at destination preparation stops all disk writes");
+            Check(await StateIs(backup, "cancelada-destino-incompleto"), "Cancellation cannot be recorded as success");
+            cases += 3;
 
-            var partial = new FakeDisks(target, Path.Combine(root, "partial-target"));
-            var partialService = new BackupService(partial, (_, size, _, _) => Task.FromResult(new MediaTestResult(size - 512, 1, 1, DateTime.UtcNow, "")));
-            await ExpectThrowsAsync<IOException>(() => partialService.RestoreAsync(backup, target, Quiet, CancellationToken.None));
-            Check(partial.TargetStream.WriteCalls == 0 && partial.MountCount == 0, "Partial capacity result is rejected before MBR/formatting");
-            cases++;
-
-            var corrupt = new FakeDisks(target, Path.Combine(root, "corrupt-target"));
-            var corruptTestCalled = false;
-            var corruptService = new BackupService(corrupt, (_, size, _, _) =>
+            var badCopy = new FakeDisks(target, Path.Combine(root, "bad-copy-target"));
+            var changedCopy = false;
+            var verificationStages = new List<WorkProgress>();
+            var corrupting = new ImmediateProgress(p =>
             {
-                corruptTestCalled = true;
-                return Task.FromResult(new MediaTestResult(size, 1, 1, DateTime.UtcNow, ""));
+                verificationStages.Add(p);
+                // Both files have been copied. While checking the first file, corrupt the second
+                // before it is opened for verification. Equal length ensures SHA, not size, catches it.
+                if (!changedCopy && p.Stage == "Verificando archivos" && p.Detail == "sample.bin")
+                {
+                    File.WriteAllBytes(Path.Combine(badCopy.TargetRoot, "z-last.bin"), tampered);
+                    changedCopy = true;
+                }
             });
-            await File.WriteAllTextAsync(Path.Combine(backup, "files", "sample.bin"), "tampered");
-            await ExpectThrowsAsync<InvalidDataException>(() => corruptService.RestoreAsync(backup, target, Quiet, CancellationToken.None));
-            Check(corrupt.OpenCount == 0 && !corruptTestCalled, "Corrupt backup cannot trigger destructive test");
-            await File.WriteAllBytesAsync(Path.Combine(backup, "files", "sample.bin"), payload);
-            cases++;
-
-            var success = new FakeDisks(target, Path.Combine(root, "success-target"));
-            var expectedResult = new MediaTestResult(target.Size, 61.25, 82.5, DateTime.UtcNow, "Synthetic performance warning");
-            var testFinished = false;
-            success.BeforeMount = () => Check(testFinished, "Mount cannot precede completed media test");
-            var service = new BackupService(success, (stream, size, _, _) =>
-            {
-                Check(success.TargetStream.WriteCalls == 0 && size == target.Size && ReferenceEquals(stream, success.TargetStream), "Capacity test precedes all formatting using same disk");
-                testFinished = true;
-                return Task.FromResult(expectedResult);
-            });
-            var actualResult = await service.RestoreAsync(backup, target, Quiet, CancellationToken.None);
-            Check(actualResult == expectedResult, "Verified media metrics propagated to caller");
-            Check(success.OpenCount == 1 && success.MountCount == 1 && success.Disposed && success.MountedPlan?.FileSystem == "FAT32", "One locked session converts to FAT32 after passing");
-            Check(success.TargetStream.Prefix[510] == 0x55 && success.TargetStream.Prefix[511] == 0xAA && success.TargetStream.Prefix[450] == 0x0C, "FAT32 MBR written only after media success");
-            Check((await File.ReadAllBytesAsync(Path.Combine(success.TargetRoot, "sample.bin"))).SequenceEqual(payload), "exFAT source file preserved on FAT32 destination");
-            using (var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(backup, "ultima-prueba-tarjeta.json"))))
-            {
-                var record = report.RootElement;
-                Check(record.GetProperty("state").GetString() == "capacidad-completa-verificada" &&
-                    record.GetProperty("result").GetProperty("BytesVerified").GetInt64() == target.Size &&
-                    record.GetProperty("result").GetProperty("WriteMiBPerSecond").GetDouble() == expectedResult.WriteMiBPerSecond,
-                    "Separate media report records full capacity and speed");
-            }
-            Check((await File.ReadAllTextAsync(Path.Combine(backup, "ultima-restauracion.json"))).Contains("completada-y-verificada"), "Success recorded only after target disposal");
-            Check(typeof(BackupService).GetConstructors().Length == 1 && typeof(BackupService).GetConstructors()[0].GetParameters().Length == 1,
-                "Production API exposes no capacity-test bypass");
-            cases += 9;
+            await ExpectThrowsAsync<IOException>(() => new BackupService(badCopy).RestoreAsync(backup, target, corrupting, CancellationToken.None));
+            Check(changedCopy && badCopy.MountCount == 1 && badCopy.Disposed,
+                "The destination's copied file is reread and corruption is rejected");
+            Check(await StateIs(backup, "error-destino-incompleto") && verificationStages.All(p => p.Stage != "Migración verificada"),
+                "A failed copied-file hash must not emit success");
+            cases += 3;
         }
         finally
         {
@@ -144,6 +142,12 @@ public static class TargetPolicyTests
             Directory.Delete(canonical, true);
         }
         return cases;
+    }
+
+    private static async Task<bool> StateIs(string backup, string state)
+    {
+        using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(backup, "ultima-restauracion.json")));
+        return report.RootElement.GetProperty("state").GetString() == state;
     }
 
     private static void Check(bool condition, string description)
@@ -158,7 +162,8 @@ public static class TargetPolicyTests
         try { await action(); } catch (T) { return; }
         throw new Exception("Expected " + typeof(T).Name);
     }
-    private sealed class ImmediateProgress : IProgress<WorkProgress> { public void Report(WorkProgress value) { } }
+    private sealed class ImmediateProgress(Action<WorkProgress> action) : IProgress<WorkProgress>
+    { public void Report(WorkProgress value) => action(value); }
 
     private sealed class FakeDisks(DiskInfo target, string targetRoot) : IDiskAccess, ITargetSession
     {
@@ -168,16 +173,17 @@ public static class TargetPolicyTests
         public int MountCount { get; private set; }
         public bool Disposed { get; private set; }
         public MigrationPlan? MountedPlan { get; private set; }
-        public Action? BeforeMount { get; set; }
         public Stream Stream => TargetStream;
         public Task<IReadOnlyList<DiskInfo>> ListDisksAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<DiskInfo>>([target]);
         public Task<DiskInfo> RefreshAsync(DiskInfo expected, CancellationToken ct) { ct.ThrowIfCancellationRequested(); return Task.FromResult(target); }
         public Stream OpenRead(DiskInfo disk) => throw new InvalidOperationException("No source device access permitted by this suite");
         public Task EnsureFolderOnOtherDiskAsync(string folder, DiskInfo disk, CancellationToken ct) => Task.CompletedTask;
-        public Task<ITargetSession> OpenTargetAsync(DiskInfo disk, CancellationToken ct) { OpenCount++; return Task.FromResult<ITargetSession>(this); }
+        public Task<ITargetSession> OpenTargetAsync(DiskInfo disk, CancellationToken ct)
+        { ct.ThrowIfCancellationRequested(); OpenCount++; return Task.FromResult<ITargetSession>(this); }
         public Task<string> MountDataAsync(MigrationPlan plan, CancellationToken ct)
         {
-            BeforeMount?.Invoke(); MountCount++; MountedPlan = plan;
+            ct.ThrowIfCancellationRequested();
+            MountCount++; MountedPlan = plan;
             Directory.CreateDirectory(targetRoot);
             return Task.FromResult(targetRoot);
         }
@@ -186,19 +192,35 @@ public static class TargetPolicyTests
 
     private sealed class TracingStream(long length) : Stream
     {
+        // Fail quickly if a future regression starts traversing the full advertised device.
+        // A 256 GiB FAT32 quick format needs less than 128 MiB for its metadata and GPT cleanup.
+        private const long IoBudget = 128L * 1024 * 1024;
         public byte[] Prefix { get; } = new byte[512];
-        public int WriteCalls { get; private set; }
+        public long BytesWritten { get; private set; }
+        public long BytesRead { get; private set; }
+        public bool FailWrites { get; set; }
         public override bool CanRead => true;
         public override bool CanSeek => true;
         public override bool CanWrite => true;
         public override long Length => length;
         public override long Position { get; set; }
-        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException("The injected media test does not read this tracing stream");
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+        public override int Read(Span<byte> buffer)
+        {
+            if (Position < 0 || Position > length) throw new IOException("Out-of-bounds simulated read");
+            int count = (int)Math.Min(buffer.Length, length - Position);
+            if (BytesRead + count > IoBudget) throw new IOException("Unexpected full-capacity reading exceeded the simulated I/O budget");
+            buffer[..count].Clear();
+            BytesRead += count; Position += count;
+            return count;
+        }
         public override void Write(byte[] buffer, int offset, int count) => Write(buffer.AsSpan(offset, count));
         public override void Write(ReadOnlySpan<byte> buffer)
         {
-            if (Position < 0 || Position + buffer.Length > length) throw new IOException("Out-of-bounds simulated write");
-            WriteCalls++;
+            if (FailWrites) throw new IOException("Simulated destination write error");
+            if (Position < 0 || buffer.Length > length - Position) throw new IOException("Out-of-bounds simulated write");
+            if (BytesWritten + buffer.Length > IoBudget) throw new IOException("Unexpected full-capacity writing exceeded the simulated I/O budget");
+            BytesWritten += buffer.Length;
             if (Position < Prefix.Length) buffer[..(int)Math.Min(buffer.Length, Prefix.Length - Position)].CopyTo(Prefix.AsSpan((int)Position));
             Position += buffer.Length;
         }

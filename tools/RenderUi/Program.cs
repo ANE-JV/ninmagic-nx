@@ -31,7 +31,7 @@ public static class RenderUi
         var plan = new MigrationPlan(new PartitionInfo(1, 0x0C, 32768, 440_000_000), new[] { new PartitionInfo(2, 0xE0, 440_100_000, 59_000_000) }, new Dictionary<uint, uint>(), 80_000_000_000, "FAT32", target.Size);
         var dialog = (Window)method.Invoke(window, new object[] { target, plan })!;
         root = (FrameworkElement)dialog.Content;
-        Render("confirmation", 604, 580);
+        Render("confirmation", 604, 510);
         dialog.Close();
         window.Close();
         void Render(string name, int width, int height)

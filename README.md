@@ -2,7 +2,7 @@
 
 Aplicación portable en español para Windows 10/11 de 64 bits. Permite guardar una copia verificada de una microSD con Atmosphère y emuMMC en el PC y restaurarla en una tarjeta de mayor capacidad, ampliando la partición de archivos.
 
-**Estado: versión 1.1 candidata para validación física.** La compilación, las pruebas automáticas y las pruebas sobre imágenes de disco han pasado. Se ha inspeccionado una tarjeta original real en modo de solo lectura; todavía no se ha restaurado una tarjeta física ni arrancado una Nintendo Switch con ella. Esto no es una garantía de ausencia de errores ni de compatibilidad con cualquier tarjeta. Conserva la original hasta verificar la nueva en tu consola.
+**Estado: versión 1.2 candidata para validación física.** La compilación, las pruebas automáticas y las pruebas sobre imágenes de disco han pasado. Se ha inspeccionado una tarjeta original real en modo de solo lectura; todavía no se ha restaurado una tarjeta física ni arrancado una Nintendo Switch con ella. Esto no es una garantía de ausencia de errores ni de compatibilidad con cualquier tarjeta. Conserva la original hasta verificar la nueva en tu consola.
 
 ## Descargar y usar
 
@@ -13,7 +13,7 @@ El ejecutable portable `ninmagic-nx.exe` se encuentra en [Releases](https://gith
 3. En **Crear copia**, selecciona la tarjeta original y una carpeta del PC. Necesitas espacio para todos los archivos utilizados **más el tamaño completo de las particiones emuMMC**. La copia se guarda en una carpeta nueva de una unidad NTFS o exFAT.
 4. Espera a **Copia terminada y verificada**. Retira la tarjeta original, conecta la nueva y pulsa **Actualizar**. Solo necesitas un lector.
 5. En **Restaurar en otra SD**, selecciona la carpeta de copia que contiene `manifest.json` y la tarjeta nueva. La aplicación comprobará la copia y mostrará el disco exacto que va a borrar. Debes escribir `BORRAR DISCO N` para confirmar.
-6. La aplicación escribe patrones distintos en toda la capacidad de la tarjeta nueva y después la relee completa. Puede tardar varias horas. Si falla, se detiene antes de crear las particiones y restaurar. Si el destino estaba en NTFS y supera la prueba, lo prepara en FAT32. Espera a **Traslado terminado y verificado**. Expulsa la tarjeta de forma segura, insértala en la **misma consola** y comprueba el arranque, los juegos y las partidas. Conserva la original y la copia del PC.
+6. La aplicación prepara las particiones y restaura tus datos. Si el destino estaba en NTFS, lo prepara en FAT32. Se releen y verifican los archivos y la emuMMC copiados. Espera a **Traslado terminado y verificado**. Expulsa la tarjeta de forma segura, insértala en la **misma consola** y comprueba el arranque, los juegos y las partidas. Conserva la original y la copia del PC.
 
 **Todo el contenido anterior de la tarjeta de destino se elimina.** La aplicación abre la tarjeta original solo para lectura y no la formatea. Una cancelación o un error deja el destino incompleto; vuelve a restaurarlo desde el principio. Las copias incompletas no se aceptan como origen.
 
@@ -48,11 +48,11 @@ Como origen se rechazan GPT/híbrido, Linux/Android, particiones extendidas o de
 
 La aplicación compara SHA-256 de las copias y de los datos restaurados. Comprueba referencias emuMMC, geometría de particiones y CRC de la GPT interna de emuMMC RAW. Bloquea discos de Windows y buses internos, revalida la identidad del destino y bloquea/desmonta sus volúmenes antes de escribir. Solo informa de éxito tras completar copia, comprobación y vaciado de escritura.
 
-La prueba completa de capacidad usa patrones aleatorios dependientes de su posición: primero escribe todo el dispositivo, vacía la escritura y después relee todo. Así detecta errores y capacidades falsas que solapan direcciones. Un fallo detiene la restauración y avisa de posibles problemas de tarjeta, lector o conexión. Un resultado correcto solo acredita los bytes comprobados en esa ejecución: no certifica marca, vida útil ni funcionamiento o rendimiento de emuMMC en la consola. Las velocidades secuenciales medidas incluyen el lector, USB, PC y la comprobación; una lectura inferior a 60 MB/s se informa sin declarar la tarjeta defectuosa por ello. El montaje, bloqueo y formateo de dispositivos físicos de Windows todavía requieren validación práctica. No desconectes el lector durante una operación. Nunca aceptes formatear la partición oculta si Windows lo propone.
+La versión 1.2 omite la prueba previa que escribía y leía toda la capacidad del destino. Conserva la comprobación de identidad, formato y tamaño anunciado por Windows, y la verificación SHA-256 de los datos copiados. Por ello no certifica toda la capacidad física, la calidad o el rendimiento de la tarjeta. Un error al copiar o verificar se comunica y detiene el proceso. El montaje, bloqueo y formateo de dispositivos físicos de Windows todavía requieren validación práctica. No desconectes el lector durante una operación. Nunca aceptes formatear la partición oculta si Windows lo propone.
 
-La conversión de un destino NTFS a FAT32 se bloquea antes de escribir si la copia contiene archivos mayores de 4 GiB menos 1 byte; no se recortan ni dividen automáticamente. La prueba de capacidad borra el contenido anterior del destino incluso si luego falla o se cancela. No se ejecuta simplemente al insertar una tarjeta: requiere seleccionar el destino y confirmar su borrado.
+La conversión de un destino NTFS a FAT32 se bloquea antes de escribir si la copia contiene archivos mayores de 4 GiB menos 1 byte; no se recortan ni dividen automáticamente. El límite de FAT32 es por archivo individual, no por juego: se conservan los juegos de mayor tamaño almacenados en varios archivos o partes. La preparación del destino requiere seleccionar la tarjeta y confirmar su borrado.
 
-Los registros se guardan en `%LOCALAPPDATA%\NinmagicNX\Logs`; la última restauración y la prueba de tarjeta (`ultima-prueba-tarjeta.json`) se registran en la carpeta de copia. El informe conserva capacidad comprobada, velocidades y, si falla, fase y posición del error cuando están disponibles. Una copia contiene datos privados de tu consola: guárdala como información personal, no la subas a este repositorio.
+Los registros se guardan en `%LOCALAPPDATA%\NinmagicNX\Logs`; la última restauración se registra en la carpeta de copia (`ultima-restauracion.json`). Los informes de pruebas de capacidad de versiones anteriores, si existen, son históricos; la versión 1.2 no los actualiza ni los utiliza como garantía. Una copia contiene datos privados de tu consola: guárdala como información personal, no la subas a este repositorio.
 
 ## Compilar y verificar
 
@@ -69,7 +69,5 @@ La implementación se divide en `Ninmagic.Nx.Core` (planificación, formatos y c
 ## Referencias técnicas
 
 El formato emuMMC se contrastó con las implementaciones originales de [Hekate](https://github.com/CTCaer/hekate/blob/master/bootloader/storage/emummc.c), su [gestor emuMMC](https://github.com/CTCaer/hekate/blob/master/nyx/nyx_gui/frontend/gui_emummc_tools.c) y su [gestor de particiones](https://github.com/CTCaer/hekate/blob/master/nyx/nyx_gui/frontend/gui_tools_partition_manager.c). La integración Windows sigue la documentación de [bloqueo de volúmenes](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-fsctl_lock_volume) e [identidad MSFT_Disk](https://learn.microsoft.com/en-us/windows-hardware/drivers/storage/msft-disk). No se ha incorporado código fuente de Hekate ni Atmosphère al ejecutable.
-
-El procedimiento de prueba completa se contrastó con el enfoque documentado por [F3](https://fight-flash-fraud.readthedocs.io/en/stable/introduction.html). La referencia de velocidad de [Nintendo](https://www.nintendo.com/au/support/articles/which-microsd-cards-are-supported/) es una recomendación de lectura secuencial para Switch, no una certificación de emuMMC.
 
 Proyecto independiente de las otras aplicaciones NinMagic. Sin afiliación con Nintendo, Hekate o Atmosphère.
