@@ -1,0 +1,24 @@
+[
+  {
+    "image": "fat32-128000000000.img",
+    "bytes": 128000000000,
+    "offset": 16777216,
+    "files": [
+      "/vacio.txt",
+      "/Nintendo/Contents/Carpeta larga de prueba/archivo grande.bin"
+    ],
+    "payload_sha256": "edae3df01ae51b9105638d5aff4ac8ed29854220a54fb01691a7aa5b0764031f",
+    "status": "PASS independent pyfatfs create/reopen/hash"
+  },
+  {
+    "image": "fat32-4294967296.img",
+    "bytes": 4294967296,
+    "offset": 16777216,
+    "files": [
+      "/vacio.txt",
+      "/Nintendo/Contents/Carpeta larga de prueba/archivo grande.bin"
+    ],
+    "payload_sha256": "edae3df01ae51b9105638d5aff4ac8ed29854220a54fb01691a7aa5b0764031f",
+    "status": "PASS independent pyfatfs create/reopen/hash"
+  }
+]
