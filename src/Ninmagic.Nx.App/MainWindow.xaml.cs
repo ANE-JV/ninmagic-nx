@@ -73,24 +73,30 @@ public partial class MainWindow : Window
         BackupTab.Style = (Style)FindResource(restore ? typeof(Button) : "Primary");
         RestoreTab.Style = (Style)FindResource(restore ? "Primary" : typeof(Button));
         SectionTitle.Text = restore ? "Prepara tu tarjeta nueva" : "Guarda todo antes de empezar";
-        SectionDescription.Text = restore ? "Selecciona una copia terminada y la microSD de destino. Revisaremos el contenido antes de pedirte que confirmes el borrado." : "La copia incluye archivos visibles, ocultos y las particiones emuMMC compatibles. La tarjeta original se abre solo para lectura.";
+        SectionDescription.Text = restore ? "Revisaremos la copia y, tras confirmar el borrado, probaremos toda la capacidad de la tarjeta nueva antes de restaurar." : "La copia incluye archivos visibles, ocultos y las particiones emuMMC compatibles. La tarjeta original se abre solo para lectura.";
         DiskLabel.Text = restore ? "MICROSD NUEVA · SE BORRARÁ COMPLETAMENTE" : "MICROSD ORIGINAL";
         FolderLabel.Text = restore ? "CARPETA DE LA COPIA TERMINADA" : "CARPETA PARA LA COPIA EN EL PC";
         FolderHint.Text = restore ? "Elige la carpeta que contiene manifest.json, files y raw." : "Necesitas espacio para los archivos y la emuMMC. Se creará una carpeta nueva dentro de la elegida.";
         ActionButton.Content = restore ? "Comprobar copia y preparar traslado" : "Crear y verificar copia";
         VerifyButton.Visibility = restore ? Visibility.Visible : Visibility.Collapsed;
         if (restore && lastBackup != null) FolderText.Text = lastBackup;
-        Summary.Text = restore ? "La tarjeta nueva debe tener al menos la capacidad real de la original. El espacio adicional se asignará a la partición de archivos." : "La copia se comprueba con SHA-256 antes de poder restaurarla. Puedes usar un solo lector.";
+        Summary.Text = restore ? "La nueva debe tener al menos la capacidad real de la original. Si está en NTFS, se preparará en FAT32. La prueba completa escribe y relee toda la tarjeta: puede tardar varias horas." : "La copia se comprueba con SHA-256 antes de poder restaurarla. Puedes usar un solo lector.";
+        UpdateDiskDetails();
         ActionButton.IsEnabled = !preview;
     }
     private void BackupTab_Click(object sender, RoutedEventArgs e) => SetMode(false);
     private void RestoreTab_Click(object sender, RoutedEventArgs e) => SetMode(true);
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshDisksAsync();
     private void DiskCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        => UpdateDiskDetails();
+    private void UpdateDiskDetails()
     {
         if (DiskDetails == null) return;
         DiskDetails.Text = DiskCombo.SelectedItem is DiskInfo d ? $"{d.BusType} · {d.PartitionStyle} · Serie: {d.SerialNumber.Trim()} · {string.Join(" / ", d.Volumes.Select(v => $"{v.FileSystem} {v.Label}"))}" : "Selecciona la tarjeta que quieres utilizar.";
+        if (restoring && DiskCombo.SelectedItem is DiskInfo target && HasNtfs(target))
+            DiskDetails.Text += "\nNTFS detectado: se creará FAT32 si supera la prueba completa, después de confirmar el borrado.";
     }
+    private static bool HasNtfs(DiskInfo disk) => disk.Volumes.Any(v => string.Equals(v.FileSystem, "NTFS", StringComparison.OrdinalIgnoreCase));
     private void FolderText_TextChanged(object sender, TextChangedEventArgs e) { }
     private void Browse_Click(object sender, RoutedEventArgs e)
     {
@@ -122,7 +128,7 @@ public partial class MainWindow : Window
         {
             Directory.CreateDirectory(logFolder);
             logFile = Path.Combine(logFolder, $"ninmagic-nx-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
-            Log("Inicio de operación ninmagic-nx 1.0.0");
+            Log("Inicio de operación ninmagic-nx 1.1.0");
             await action(operation.Token);
         }
         catch (OperationCanceledException)
@@ -175,11 +181,11 @@ public partial class MainWindow : Window
                 ct.ThrowIfCancellationRequested();
                 Progress.IsIndeterminate = false;
                 if (!ConfirmErase(disk, plan)) { StatusText.Text = "Restauración sin iniciar"; ProgressDetail.Text = "No has confirmado el borrado de la tarjeta de destino."; return; }
-                await Task.Run(() => service.RestoreAsync(folder, disk, reporter, ct), ct);
+                var media = await Task.Run(() => service.RestoreAsync(folder, disk, reporter, ct), ct);
                 Progress.Value = 100;
                 StatusText.Text = "Traslado terminado y verificado";
                 ProgressDetail.Text = "Expulsa la tarjeta de forma segura y pruébala en la misma consola. Conserva la original.";
-                Summary.Text = $"Destino verificado. La partición de archivos dispone de {plan.DataPartition.Length / 1_000_000_000.0:0.0} GB brutos. La emuMMC mantiene su tamaño.";
+                Summary.Text = $"Prueba completa superada: {media.BytesVerified / 1_000_000_000.0:0.0} GB escritos y releídos sin diferencias. Escritura: {media.WriteMiBPerSecond * 1.048576:0.0} MB/s; lectura: {media.ReadMiBPerSecond * 1.048576:0.0} MB/s.\nDestino {plan.FileSystem} verificado: {plan.DataPartition.Length / 1_000_000_000.0:0.0} GB brutos para archivos. La emuMMC mantiene su tamaño.\n{media.Warning}";
                 Log("Restauración y comprobación terminadas.");
             }
         });
@@ -198,19 +204,25 @@ public partial class MainWindow : Window
     }
     private bool ConfirmErase(DiskInfo disk, MigrationPlan plan)
     {
+        var dialog = CreateEraseDialog(disk, plan);
+        dialog.Owner = this;
+        return dialog.ShowDialog() == true;
+    }
+    private Window CreateEraseDialog(DiskInfo disk, MigrationPlan plan)
+    {
         var text = $"BORRAR DISCO {disk.Number}";
-        var dialog = new Window { Title = "Confirmar la tarjeta de destino", Owner = this, Width = 580, Height = 445, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)FindResource("Surface"), FontFamily = FontFamily, FontSize = 14 };
+        var dialog = new Window { Title = "Confirmar la tarjeta de destino", Width = 620, Height = 620, MaxHeight = SystemParameters.WorkArea.Height, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = (Brush)FindResource("Surface"), Foreground = Foreground, FontFamily = FontFamily, FontSize = 14 };
         var panel = new StackPanel { Margin = new Thickness(26) };
         panel.Children.Add(new TextBlock { Text = "Se borrará toda la tarjeta seleccionada", FontSize = 22, FontWeight = FontWeights.Bold, Foreground = Brushes.LightSalmon, Margin = new Thickness(0, 0, 0, 15) });
-        panel.Children.Add(new TextBlock { Text = $"{disk}\nSerie: {disk.SerialNumber}\n\nArchivos: {plan.DataPartition.Length / 1_000_000_000.0:0.0} GB · emuMMC: {plan.RawPartitions.Count} partición(es).\nLa copia del PC ya ha sido verificada. El borrado del destino no se puede deshacer.", Margin = new Thickness(0, 0, 0, 20) });
+        panel.Children.Add(new TextBlock { Text = $"{disk}\nSerie: {disk.SerialNumber}\n\nFormato final: {plan.FileSystem}{(HasNtfs(disk) ? " · conversión desde NTFS" : "")}\nArchivos: {plan.DataPartition.Length / 1_000_000_000.0:0.0} GB · emuMMC: {plan.RawPartitions.Count} partición(es).\n\nPrimero se escribirá y releerá toda la capacidad del destino. Puede tardar varias horas. Si hay diferencias o errores, se detendrá y no se restaurará la copia. El destino quedará borrado aunque la prueba falle o se cancele.\n\nLa copia del PC ya ha sido verificada. El borrado del destino no se puede deshacer.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) });
         panel.Children.Add(new TextBlock { Text = "Para continuar, escribe: " + text, Margin = new Thickness(0, 0, 0, 8) });
         var input = new TextBox { Margin = new Thickness(0, 0, 0, 20) }; panel.Children.Add(input);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "Volver", Margin = new Thickness(0, 0, 10, 0), IsCancel = true }; cancel.Click += (_, _) => dialog.DialogResult = false;
-        var confirm = new Button { Content = "Borrar y restaurar", IsEnabled = false, Background = Brushes.LightSalmon, Foreground = Brushes.Black }; confirm.Click += (_, _) => dialog.DialogResult = true;
+        var confirm = new Button { Content = "Borrar, probar y restaurar", IsEnabled = false, Background = Brushes.LightSalmon, Foreground = Brushes.Black }; confirm.Click += (_, _) => dialog.DialogResult = true;
         input.TextChanged += (_, _) => confirm.IsEnabled = string.Equals(input.Text, text, StringComparison.Ordinal);
-        buttons.Children.Add(cancel); buttons.Children.Add(confirm); panel.Children.Add(buttons); dialog.Content = panel;
-        return dialog.ShowDialog() == true;
+        buttons.Children.Add(cancel); buttons.Children.Add(confirm); panel.Children.Add(buttons); dialog.Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        return dialog;
     }
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
@@ -234,7 +246,7 @@ public partial class MainWindow : Window
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "No se pudo reiniciar"); }
     }
     private void Help_Click(object sender, RoutedEventArgs e) => MessageBox.Show(this,
-        "1. Apaga la consola completamente y conecta la tarjeta original. No uses sus archivos durante la copia.\n2. Abre ninmagic-nx como administrador. Guarda la copia en un disco NTFS/exFAT del PC con espacio libre suficiente.\n3. Espera a «Copia terminada y verificada». Retira la original y conecta la nueva.\n4. Elige «Restaurar», la copia y la tarjeta de destino. Comprueba su modelo y tamaño antes de confirmar el borrado.\n5. Expulsa la tarjeta nueva y comprueba el arranque en la misma consola. Conserva la original y la copia.\n\nCompatibilidad: Windows 10/11 x64, discos externos USB/SD/MMC, sectores lógicos de 512 bytes, tabla MBR, una partición FAT32 o exFAT y emuMMC Hekate RAW o por archivos. Hasta el límite MBR de 2 TiB. La capacidad real del destino debe ser igual o mayor que la original. GPT, Android/Linux y diseños desconocidos se bloquean.\n\nSe conservan las partidas dentro de emuMMC y los archivos de la SD. Las partidas de sysMMC están en la memoria de la consola. No se cambia de consola ni se descifran datos.\n\nUna tarjeta defectuosa o un corte de corriente puede interrumpir el traslado. Una operación incompleta nunca se presenta como correcta. La verificación del PC no sustituye la prueba de arranque en tu consola.", "ninmagic-nx · Ayuda", MessageBoxButton.OK, MessageBoxImage.Information);
+        "1. Apaga la consola completamente y conecta la tarjeta original. No uses sus archivos durante la copia.\n2. Abre ninmagic-nx como administrador. Guarda la copia en un disco NTFS/exFAT del PC con espacio libre suficiente.\n3. Espera a «Copia terminada y verificada». Retira la original y conecta la nueva.\n4. Elige «Restaurar», la copia y la tarjeta de destino. Comprueba su modelo y tamaño antes de confirmar. Se probará toda su capacidad antes de restaurar; puede tardar varias horas. Si está en NTFS, se preparará en FAT32.\n5. Expulsa la tarjeta nueva y comprueba el arranque en la misma consola. Conserva la original y la copia.\n\nCompatibilidad: Windows 10/11 x64, discos externos USB/SD/MMC, sectores lógicos de 512 bytes, tabla MBR, una partición FAT32 o exFAT y emuMMC Hekate RAW o por archivos. Hasta el límite MBR de 2 TiB. La capacidad real del destino debe ser igual o mayor que la original. Las tarjetas originales GPT, Android/Linux y diseños desconocidos se bloquean. Un destino NTFS se convierte a FAT32; si la copia tiene archivos mayores de 4 GiB menos 1 byte, se bloquea antes de borrar.\n\nSe conservan las partidas dentro de emuMMC y los archivos de la SD. Las partidas de sysMMC están en la memoria de la consola. No se cambia de consola ni se descifran datos.\n\nLa prueba completa detecta diferencias de datos y capacidad falsa durante esta ejecución. Un fallo puede deberse a la tarjeta, el lector o la conexión; se detiene antes de restaurar. La velocidad medida no certifica emuMMC, marca ni vida útil. Un corte de corriente también puede interrumpir el traslado. Una operación incompleta nunca se presenta como correcta. La verificación del PC no sustituye la prueba de arranque en tu consola.", "ninmagic-nx · Ayuda", MessageBoxButton.OK, MessageBoxImage.Information);
     private void Logs_Click(object sender, RoutedEventArgs e)
     {
         try

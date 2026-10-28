@@ -4,5 +4,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Ninmagic.Nx.Core/Ninmagic.Nx.Core.csproj" />
+    <InternalsVisibleTo Include="Ninmagic.Nx.Tests" />
   </ItemGroup>
 </Project>

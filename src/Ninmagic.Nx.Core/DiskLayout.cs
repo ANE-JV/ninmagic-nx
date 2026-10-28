@@ -137,6 +137,7 @@ public static class DiskLayout
     {
         ValidateDevice(target);
         if (manifest.FileSystem is not ("FAT32" or "exFAT")) throw new NotSupportedException("El sistema de archivos de la copia no es compatible.");
+        string fileSystem = ResolveTargetFileSystem(manifest, target);
         if (manifest.RawPartitions.Count > 3) throw new InvalidDataException("Hay demasiadas particiones emuMMC.");
         ulong cursor = ((ulong)target.Size / 512 - Alignment) / Alignment * Alignment;
         var raw = new PartitionInfo[manifest.RawPartitions.Count];
@@ -154,22 +155,28 @@ public static class DiskLayout
             if (!map.TryAdd(source.EmuSector, newSector)) throw new InvalidDataException("La copia contiene emuMMC duplicadas o ambiguas.");
         }
         if (cursor <= DataStart) throw new InvalidDataException("No queda espacio para los archivos.");
-        var data = new PartitionInfo(1, manifest.FileSystem == "FAT32" ? (byte)0x0C : (byte)0x07, DataStart, checked((uint)(cursor - DataStart)));
+        var data = new PartitionInfo(1, fileSystem == "FAT32" ? (byte)0x0C : (byte)0x07, DataStart, checked((uint)(cursor - DataStart)));
         long required = 0;
         foreach (var entry in manifest.Files)
         {
-            if (entry.Length < 0 || (manifest.FileSystem == "FAT32" && !entry.IsDirectory && entry.Length > uint.MaxValue))
+            if (entry.Length < 0)
                 throw new InvalidDataException("Un archivo de la copia no cabe en el sistema de archivos de destino.");
+            if (fileSystem == "FAT32" && !entry.IsDirectory && entry.Length > uint.MaxValue)
+                throw new InvalidDataException($"No se puede conservar el archivo «{entry.Path}» al convertir el destino a FAT32: supera el límite de 4 GiB menos 1 byte. No se ha escrito en la tarjeta de destino.");
             // exFAT formatter uses 128 KiB units; FAT32 uses 32 KiB units.
-            long allocation = manifest.FileSystem == "FAT32" ? 32768 : 131072;
+            long allocation = fileSystem == "FAT32" ? 32768 : 131072;
             required = checked(required + (entry.IsDirectory ? allocation : checked((entry.Length + allocation - 1) / allocation * allocation)));
             required = checked(required + 1024); // long names, directory growth and metadata.
         }
         required = checked(required + 64L * 1024 * 1024);
-        long capacity = manifest.FileSystem == "FAT32" ? Fat32Formatter.GetGeometry(data).DataBytes : checked(data.Length - Math.Max(64L * 1024 * 1024, data.Length / 100));
+        long capacity = fileSystem == "FAT32" ? Fat32Formatter.GetGeometry(data).DataBytes : checked(data.Length - Math.Max(64L * 1024 * 1024, data.Length / 100));
         if (required > capacity) throw new InvalidDataException($"La tarjeta de destino no tiene espacio suficiente. Se necesitan aproximadamente {required / 1_000_000_000.0:0.00} GB para los archivos, además de emuMMC.");
-        return new(data, raw, map, required, manifest.FileSystem, target.Size);
+        return new(data, raw, map, required, fileSystem, target.Size);
     }
+
+    public static string ResolveTargetFileSystem(BackupManifest manifest, DiskInfo target) =>
+        target.Volumes.Any(volume => string.Equals(volume.FileSystem, "NTFS", StringComparison.OrdinalIgnoreCase))
+            ? "FAT32" : manifest.FileSystem;
 
     public static void WriteMbr(Stream disk, MigrationPlan plan)
     {

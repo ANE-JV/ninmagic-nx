@@ -20,4 +20,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ninmagic-nx-windows-x64
-          path: dist/ninmagic-nx-1.0.0-windows-x64.zip
+          path: dist/ninmagic-nx-*-windows-x64.zip

@@ -161,7 +161,9 @@ internal sealed class PhysicalDiskStream : Stream
     {
         this.length = length;
         this.writable = writable;
-        inner = new FileStream(handle, writable ? FileAccess.ReadWrite : FileAccess.Read, 1024 * 1024, false);
+        // Callers already use large transfer buffers. Disable FileStream's extra buffer so a
+        // final-sector read cannot read ahead beyond the physical device's declared length.
+        inner = new FileStream(handle, writable ? FileAccess.ReadWrite : FileAccess.Read, bufferSize: 1, isAsync: false);
     }
     public override bool CanRead => inner.CanRead;
     public override bool CanSeek => inner.CanSeek;

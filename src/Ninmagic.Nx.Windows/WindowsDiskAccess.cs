@@ -195,6 +195,18 @@ public sealed class WindowsDiskAccess : IDiskAccess
         if (!IsAdministrator) throw new UnauthorizedAccessException("Abre ninmagic-nx como administrador para acceder a las tarjetas.");
     }
 
+    internal static void CloseRawResources(Stream stream, List<SafeFileHandle> locks)
+    {
+        try { stream.Dispose(); }
+        finally
+        {
+            // A failed write or flush must not leave any destination volume locked. SafeFileHandle
+            // closes do not throw on a native CloseHandle failure, preserving the stream exception.
+            foreach (SafeFileHandle handle in locks) handle.Dispose();
+            locks.Clear();
+        }
+    }
+
     private sealed class TargetSession(WindowsDiskAccess owner, DiskInfo target, SafeFileHandle physical,
         PhysicalDiskStream stream, List<SafeFileHandle> locks) : ITargetSession
     {
@@ -291,9 +303,7 @@ public sealed class WindowsDiskAccess : IDiskAccess
         {
             if (rawClosed) return;
             rawClosed = true;
-            stream.Dispose();
-            foreach (SafeFileHandle handle in locks) handle.Dispose();
-            locks.Clear();
+            CloseRawResources(stream, locks);
         }
         public void Dispose()
         {
