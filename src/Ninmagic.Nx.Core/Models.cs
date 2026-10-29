@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Ninmagic.Nx.Core;
 
 public sealed record DiskInfo(int Number, string FriendlyName, string SerialNumber, string UniqueId,
@@ -5,9 +7,37 @@ public sealed record DiskInfo(int Number, string FriendlyName, string SerialNumb
     string PartitionStyle, IReadOnlyList<VolumeInfo> Volumes)
 {
     public string Identity => $"{Number}|{SerialNumber}|{UniqueId}|{Size}|{LogicalSectorSize}|{BusType}";
-    public override string ToString() => $"Disco {Number} · {FriendlyName} · {Size / 1_000_000_000.0:0.0} GB · {string.Join(", ", Volumes.Where(v => !string.IsNullOrWhiteSpace(v.FileSystem)).Select(v => v.Root.Length <= 3 ? v.Root : v.FileSystem))}";
+    [JsonIgnore]
+    public string DriveLettersDisplay
+    {
+        get
+        {
+            var letters = Volumes.Select(v => v.DriveLetterDisplay).Where(letter => letter != "Sin letra asignada")
+                .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+            return letters.Length > 0 ? string.Join(", ", letters) : "Sin letra asignada";
+        }
+    }
+    [JsonIgnore]
+    public string DisplayName => $"{DriveLettersDisplay} · Disco {Number} · {FriendlyName} · {Size / 1_000_000_000.0:0.0} GB · {string.Join(", ", Volumes.Where(v => !string.IsNullOrWhiteSpace(v.FileSystem)).Select(v => v.FileSystem).Distinct(StringComparer.OrdinalIgnoreCase))}";
+    public override string ToString() => DisplayName;
 }
-public sealed record VolumeInfo(int PartitionNumber, long Offset, long Size, string Root, string FileSystem, string Label);
+public sealed record VolumeInfo(int PartitionNumber, long Offset, long Size, string Root, string FileSystem, string Label)
+{
+    // Display metadata only. Keep the stable volume GUID in Root for disk access and validation.
+    public string DriveLetter { get; init; } = "";
+    [JsonIgnore]
+    public string DriveLetterDisplay => NormalizeDriveLetter(DriveLetter) ?? NormalizeDriveLetter(Root) ?? "Sin letra asignada";
+
+    private static string? NormalizeDriveLetter(string? value)
+    {
+        value = value?.Trim();
+        if (value is null || value.Length == 0 || !char.IsAsciiLetter(value[0])) return null;
+        if (value.Length == 1 || value.Length == 2 && value[1] == ':' ||
+            value.Length == 3 && value[1] == ':' && value[2] == '\\')
+            return char.ToUpperInvariant(value[0]) + ":";
+        return null;
+    }
+}
 public sealed record PartitionInfo(int Index, byte Type, uint StartSector, uint SectorCount)
 {
     public long Offset => (long)StartSector * 512;

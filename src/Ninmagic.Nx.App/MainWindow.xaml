@@ -35,6 +35,7 @@
               <TextBlock x:Name="VerificationHint" Text="Relee los archivos guardados en la tarjeta para detectar errores. Tarda más." FontSize="11" Foreground="{StaticResource Muted}" Margin="20,5,0,0"/>
             </StackPanel>
             <Button x:Name="ActionButton" Content="Crear y verificar copia" Style="{StaticResource Primary}" Click="Action_Click" HorizontalAlignment="Left" MinWidth="240"/>
+            <TextBlock x:Name="ActionNotice" Visibility="Collapsed" Foreground="#F7D99D" FontSize="12" Margin="0,8,0,0" AutomationProperties.LiveSetting="Assertive"/>
             <Button x:Name="VerifyButton" Content="Comprobar una copia sin restaurar" Click="Verify_Click" HorizontalAlignment="Left" Background="Transparent" Padding="0,14,0,0" Foreground="{StaticResource Accent}" Visibility="Collapsed"/>
           </StackPanel>
         <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
@@ -70,6 +71,6 @@
         <Button x:Name="CancelButton" Grid.Column="1" Content="Cancelar" Click="Cancel_Click" IsEnabled="False" VerticalAlignment="Center" Margin="20,0,0,0"/>
       </Grid>
     </Border>
-    <DockPanel Grid.Row="4" Margin="2,13,2,0"><Button Content="Ayuda y compatibilidad" Click="Help_Click" Background="Transparent" Foreground="{StaticResource Muted}" Padding="0" FontSize="12" DockPanel.Dock="Left"/><Button Content="Abrir registros" Click="Logs_Click" Background="Transparent" Foreground="{StaticResource Muted}" Padding="15,0,0,0" FontSize="12" DockPanel.Dock="Right"/><TextBlock Text="1.5.0 · NinMagic · JV" FontSize="12" Foreground="#9EADC0" HorizontalAlignment="Right"/></DockPanel>
+    <DockPanel Grid.Row="4" Margin="2,13,2,0"><Button Content="Ayuda y compatibilidad" Click="Help_Click" Background="Transparent" Foreground="{StaticResource Muted}" Padding="0" FontSize="12" DockPanel.Dock="Left"/><Button Content="Abrir registros" Click="Logs_Click" Background="Transparent" Foreground="{StaticResource Muted}" Padding="15,0,0,0" FontSize="12" DockPanel.Dock="Right"/><TextBlock Text="1.5.1 · NinMagic · JV" FontSize="12" Foreground="#9EADC0" HorizontalAlignment="Right"/></DockPanel>
   </Grid>
 </Window>
