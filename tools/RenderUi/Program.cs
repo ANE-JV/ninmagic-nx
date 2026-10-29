@@ -27,6 +27,11 @@ public static class RenderUi
         combo.ItemsSource = new[] { target }; combo.SelectedIndex = 0;
         Render("restore", 1124, 810);
         Render("restore-small", 884, 700);
+        var verifyFiles = (CheckBox)window.FindName("VerifyFilesOption");
+        verifyFiles.IsChecked = false;
+        Render("restore-no-verification", 1124, 810);
+        Render("restore-no-verification-small", 884, 700);
+        verifyFiles.IsChecked = true;
         var displayProgress = typeof(Ninmagic.Nx.App.MainWindow).GetMethod("DisplayProgress", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var renderEstimate = typeof(Ninmagic.Nx.App.MainWindow).GetMethod("RenderEstimate", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var steps = new WorkStep[]
@@ -56,9 +61,13 @@ public static class RenderUi
         Render("finalizing-small", 884, 700);
         var method = typeof(Ninmagic.Nx.App.MainWindow).GetMethod("CreateEraseDialog", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var plan = new MigrationPlan(new PartitionInfo(1, 0x0C, 32768, 440_000_000), new[] { new PartitionInfo(2, 0xE0, 440_100_000, 59_000_000) }, new Dictionary<uint, uint>(), 80_000_000_000, "FAT32", target.Size);
-        var dialog = (Window)method.Invoke(window, new object[] { target, plan })!;
+        var dialog = (Window)method.Invoke(window, new object[] { target, plan, new RestoreOptions() })!;
         root = (FrameworkElement)dialog.Content;
         Render("confirmation", 604, 510);
+        dialog.Close();
+        dialog = (Window)method.Invoke(window, new object[] { target, plan, new RestoreOptions(false) })!;
+        root = (FrameworkElement)dialog.Content;
+        Render("confirmation-no-verification", 604, 510);
         dialog.Close();
         window.Close();
         void Render(string name, int width, int height)

@@ -2,7 +2,7 @@
 
 Aplicación portable en español para Windows 10/11 de 64 bits. Permite guardar una copia verificada de una microSD con Atmosphère y emuMMC en el PC y restaurarla en una tarjeta de mayor capacidad, ampliando la partición de archivos.
 
-**Estado: versión 1.3 candidata para validación física.** La validación de arranque en una Nintendo Switch sigue pendiente. Las comprobaciones automáticas y sobre dispositivos simulados no son una garantía de ausencia de errores ni de compatibilidad con cualquier tarjeta. Conserva la original hasta verificar la nueva en tu consola.
+**Estado: versión 1.4 candidata para validación física.** La validación de arranque en una Nintendo Switch sigue pendiente. Las comprobaciones automáticas y sobre dispositivos simulados no son una garantía de ausencia de errores ni de compatibilidad con cualquier tarjeta. Conserva la original hasta verificar la nueva en tu consola.
 
 ## Descargar y usar
 
@@ -13,7 +13,7 @@ El ejecutable portable `ninmagic-nx.exe` se encuentra en [Releases](https://gith
 3. En **Crear copia**, selecciona la tarjeta original y una carpeta del PC. Necesitas espacio para todos los archivos utilizados **más el tamaño completo de las particiones emuMMC**. La copia se guarda en una carpeta nueva de una unidad NTFS o exFAT.
 4. Espera a **Copia terminada y verificada**. Retira la tarjeta original, conecta la nueva y pulsa **Actualizar**. Solo necesitas un lector.
 5. En **Restaurar en otra SD**, selecciona la carpeta de copia que contiene `manifest.json` y la tarjeta nueva. La aplicación comprobará la copia y mostrará el disco exacto que va a borrar. Debes escribir `BORRAR DISCO N` para confirmar.
-6. La aplicación prepara las particiones y restaura tus datos. Si el destino estaba en NTFS, lo prepara en FAT32. Se releen y verifican los archivos y la emuMMC copiados. Espera a **Traslado terminado y verificado**. Expulsa la tarjeta de forma segura, insértala en la **misma consola** y comprueba el arranque, los juegos y las partidas. Conserva la original y la copia del PC.
+6. La aplicación prepara las particiones y restaura tus datos. Si el destino estaba en NTFS, lo prepara en FAT32. La opción **Verificar archivos después de copiarlos (recomendado)** está activada por defecto. Espera a **Traslado terminado y verificado**, o **Traslado terminado · archivos sin verificar** si has desactivado esa opción. Expulsa la tarjeta de forma segura, insértala en la **misma consola** y comprueba el arranque, los juegos y las partidas. Conserva la original y la copia del PC.
 
 **Todo el contenido anterior de la tarjeta de destino se elimina.** La aplicación abre la tarjeta original solo para lectura y no la formatea. Una cancelación o un error deja el destino incompleto; vuelve a restaurarlo desde el principio. Las copias incompletas no se aceptan como origen.
 
@@ -25,7 +25,15 @@ El panel muestra el tiempo transcurrido, el **tiempo restante del paso** y el **
 
 Los tiempos son aproximados: los archivos pequeños, el lector y las tareas de montaje, atributos y vaciado pueden cambiarlos. En estos últimos pasos se indica una duración variable. El reloj se pausa al pedir confirmación y se reinicia al comenzar el traslado. Solo se indica que todo ha terminado cuando se completa también el vaciado final de escritura. Una cancelación o un error nunca se presenta como éxito.
 
-Esta actualización cambia la información de progreso; no incorpora todavía compatibilidad Android/Linux ni promete una reducción del tiempo de copia.
+## Verificación final opcional · versión 1.4
+
+En **Restaurar en otra SD** puedes desmarcar **Verificar archivos después de copiarlos (recomendado)** para omitir la lectura final del contenido de los archivos de la tarjeta nueva. Esto ahorra esa pasada, pero puede dejar sin detectar archivos guardados incorrectamente. La elección aparece también en la confirmación del borrado y no puede cambiarse durante el traslado. Cada nueva apertura de la aplicación vuelve a tener activada la verificación.
+
+Se mantienen la comprobación de la copia del PC antes de borrar, los hashes calculados al leer esa copia durante la transferencia, la verificación de las particiones emuMMC RAW y el vaciado final de escritura. Los hashes calculados mientras se copia no prueban que los archivos hayan quedado bien guardados en el destino. Si la emuMMC está almacenada **por archivos**, su contenido forma parte de esta opción: sus archivos tampoco se releen al desactivarla.
+
+Sin verificación final hay un paso menos y el tiempo estimado se ajusta. El resultado se identifica como **archivos sin verificar** tanto en pantalla como en el registro `ultima-restauracion.json`; nunca se certifica como una migración totalmente verificada. Un error de escritura, de vaciado o una cancelación sigue dejando el destino incompleto. La opción no permite reanudar operaciones interrumpidas.
+
+Esta actualización no incorpora todavía compatibilidad Android/Linux ni cambios de logo o fondo.
 
 ## Qué se conserva
 
@@ -56,7 +64,7 @@ Como origen se rechazan GPT/híbrido, Linux/Android, particiones extendidas o de
 
 ## Integridad y límites
 
-La aplicación compara SHA-256 de las copias y de los datos restaurados. Comprueba referencias emuMMC, geometría de particiones y CRC de la GPT interna de emuMMC RAW. Bloquea discos de Windows y buses internos, revalida la identidad del destino y bloquea/desmonta sus volúmenes antes de escribir. Solo informa de éxito tras completar copia, comprobación y vaciado de escritura.
+La aplicación compara SHA-256 de las copias y, con la verificación final activada, de los archivos restaurados. Las particiones emuMMC RAW se comprueban siempre. Comprueba referencias emuMMC, geometría de particiones y CRC de la GPT interna de emuMMC RAW. Bloquea discos de Windows y buses internos, revalida la identidad del destino y bloquea/desmonta sus volúmenes antes de escribir. Solo informa de finalización tras completar copia, las comprobaciones elegidas y el vaciado de escritura, distinguiendo el resultado con archivos verificados del resultado sin verificar.
 
 La versión 1.2 omite la prueba previa que escribía y leía toda la capacidad del destino. Conserva la comprobación de identidad, formato y tamaño anunciado por Windows, y la verificación SHA-256 de los datos copiados. Por ello no certifica toda la capacidad física, la calidad o el rendimiento de la tarjeta. Un error al copiar o verificar se comunica y detiene el proceso. El montaje, bloqueo y formateo de dispositivos físicos de Windows todavía requieren validación práctica. No desconectes el lector durante una operación. Nunca aceptes formatear la partición oculta si Windows lo propone.
 
@@ -74,7 +82,7 @@ Requiere .NET SDK 8 para compilar, Windows y PowerShell para la aplicación. No 
 
 El script ejecuta las pruebas sobre dispositivos simulados y genera el ejecutable portable y el ZIP en `dist`. **No escribe en discos físicos.** La prueba opcional `--inventory` consulta dispositivos sin modificarlos. El detalle y las limitaciones están en [docs/VALIDACION.md](docs/VALIDACION.md).
 
-Para preparar otra versión mientras está ejecutándose la anterior, usa una carpeta diferente: `./tools/build.ps1 -OutputRoot dist/v1.3.0`. No reemplaces ni reinicies el ejecutable durante un traslado.
+Para preparar otra versión mientras está ejecutándose la anterior, usa una carpeta diferente: `./tools/build.ps1 -OutputRoot dist/v1.4.0`. No reemplaces ni reinicies el ejecutable durante un traslado.
 
 La implementación se divide en `Ninmagic.Nx.Core` (planificación, formatos y copias), `Ninmagic.Nx.Windows` (dispositivos y montaje) y `Ninmagic.Nx.App` (asistente WPF). Las pruebas usan discos dispersos simulados y carpetas temporales, con comprobaciones de corrupción, cancelación y preservación de metadatos.
 

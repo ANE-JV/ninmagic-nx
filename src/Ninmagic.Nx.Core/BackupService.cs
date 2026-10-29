@@ -122,7 +122,7 @@ public sealed class BackupService
         if (after.Count != inventory.Count || !after.SequenceEqual(inventory))
             throw new IOException("La tarjeta cambió durante la copia. No se completó la copia; cierra los programas que la utilizan y repite en una carpeta nueva.");
 
-        var manifest = new BackupManifest(1, "1.3.0", DateTime.UtcNow, source, layout.Data,
+        var manifest = new BackupManifest(1, "1.4.0", DateTime.UtcNow, source, layout.Data,
             layout.FileSystem, volume.Label, rawParts, files, excluded);
         ValidateManifest(manifest);
         operationProgress.Report(filesStep + 2, "Verificando copia", "Comprobando los datos guardados en el PC", 0, totalBytes);
@@ -197,14 +197,17 @@ public sealed class BackupService
         return plan;
     }
 
-    public async Task RestoreAsync(string backupFolder, DiskInfo target,
-        IProgress<WorkProgress> progress, CancellationToken cancellationToken)
+    public async Task<RestoreResult> RestoreAsync(string backupFolder, DiskInfo target,
+        IProgress<WorkProgress> progress, CancellationToken cancellationToken, RestoreOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(progress);
+        options ??= new RestoreOptions();
         backupFolder = Path.GetFullPath(backupFolder);
         // Repeat validation after confirmation. A previous plan never grants permission to stale hardware.
         var manifest = await LoadManifestAsync(backupFolder, cancellationToken);
-        var operationProgress = new OperationProgress(progress, "Restaurar tarjeta", RestoreSteps(manifest));
+        var operationSteps = RestoreSteps(manifest, options);
+        var operationProgress = new OperationProgress(progress, "Restaurar tarjeta", operationSteps);
+        var finalizeStep = operationSteps.Count;
         await VerifyBackupAsync(backupFolder, manifest, operationProgress, 1, cancellationToken);
         target = await disks.RefreshAsync(target, cancellationToken);
         await disks.EnsureFolderOnOtherDiskAsync(backupFolder, target, cancellationToken);
@@ -212,6 +215,7 @@ public sealed class BackupService
         var plan = DiskLayout.Plan(manifest, target);
         var statusPath = SafePaths.Resolve(backupFolder, "ultima-restauracion.json");
         await WriteStatusAsync(statusPath, "iniciada", target, null);
+        var filesVerified = false;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -278,42 +282,57 @@ public sealed class BackupService
                 if (!known.ContainsKey(relative) || patch.Value is null || patch.Value.Length > 1024 * 1024)
                     throw new InvalidDataException("Se intentó cambiar una referencia emuMMC que no pertenece a la copia.");
             }
-            fileDone = 0;
-            operationProgress.Report(mountStep + 2, "Verificando archivos", "Comprobando los archivos de la tarjeta nueva", 0, fileTotal);
-            foreach (var entry in manifest.Files.Where(f => !f.IsDirectory))
+            if (options.VerifyFilesAfterCopy)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var path = SafePaths.Resolve(targetRoot, entry.Path);
-                var expectedHash = entry.Sha256;
-                var expectedLength = entry.Length;
-                if (patched.TryGetValue(entry.Path, out var bytes))
+                fileDone = 0;
+                operationProgress.Report(mountStep + 2, "Verificando archivos", "Comprobando los archivos de la tarjeta nueva", 0, fileTotal);
+                foreach (var entry in manifest.Files.Where(f => !f.IsDirectory))
                 {
-                    expectedHash = Convert.ToHexString(SHA256.HashData(bytes));
-                    expectedLength = bytes.LongLength;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var path = SafePaths.Resolve(targetRoot, entry.Path);
+                    var expectedHash = entry.Sha256;
+                    var expectedLength = entry.Length;
+                    if (patched.TryGetValue(entry.Path, out var bytes))
+                    {
+                        expectedHash = Convert.ToHexString(SHA256.HashData(bytes));
+                        expectedLength = bytes.LongLength;
+                    }
+                    await using (var input = ReadFile(path))
+                    {
+                        if (input.Length != expectedLength) throw new IOException($"Tamaño incorrecto en destino: {entry.Path}");
+                        var actual = await HashAsync(input, input.Length,
+                            n => operationProgress.Report(mountStep + 2, "Verificando archivos", entry.Path, fileDone + n, fileTotal), cancellationToken);
+                        if (!HashMatches(actual, expectedHash)) throw new IOException($"Error de verificación en destino: {entry.Path}");
+                    }
+                    ApplyMetadata(path, entry);
+                    fileDone += entry.Length;
                 }
-                await using (var input = ReadFile(path))
-                {
-                    if (input.Length != expectedLength) throw new IOException($"Tamaño incorrecto en destino: {entry.Path}");
-                    var actual = await HashAsync(input, input.Length,
-                        n => operationProgress.Report(mountStep + 2, "Verificando archivos", entry.Path, fileDone + n, fileTotal), cancellationToken);
-                    if (!HashMatches(actual, expectedHash)) throw new IOException($"Error de verificación en destino: {entry.Path}");
-                }
-                ApplyMetadata(path, entry);
-                fileDone += entry.Length;
+                filesVerified = true;
             }
+            operationProgress.Report(finalizeStep, "Finalizando traslado", "Conservando atributos y fechas");
+            if (!options.VerifyFilesAfterCopy)
+                foreach (var entry in manifest.Files.Where(f => !f.IsDirectory))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    ApplyMetadata(SafePaths.Resolve(targetRoot, entry.Path), entry);
+                }
             // Creating children changes directory timestamps and archive flags. Restore these last, deepest first.
-            operationProgress.Report(mountStep + 3, "Finalizando traslado", "Conservando atributos y fechas de las carpetas");
             foreach (var entry in manifest.Files.Where(f => f.IsDirectory).OrderByDescending(f => f.Path.Count(c => c == '/')))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 ApplyMetadata(SafePaths.Resolve(targetRoot, entry.Path), entry);
             }
-            operationProgress.Report(mountStep + 3, "Finalizando traslado", "Confirmando que Windows ha terminado de escribir la tarjeta");
+            operationProgress.Report(finalizeStep, "Finalizando traslado", "Confirmando que Windows ha terminado de escribir la tarjeta");
             } // Dispose performs the final volume flush; success is recorded only after it succeeds.
-            await WriteStatusAsync(statusPath, "completada-y-verificada", target, null);
-            operationProgress.Report(6 + 2 * manifest.RawPartitions.Count, "Migración verificada",
-                "Expulsa la tarjeta de forma segura y comprueba el arranque en la misma consola. Conserva la original y la copia.",
+            cancellationToken.ThrowIfCancellationRequested();
+            await WriteStatusAsync(statusPath, filesVerified ? "completada-y-verificada" : "completada-sin-verificacion-de-archivos",
+                target, null, filesVerified);
+            operationProgress.Report(finalizeStep, filesVerified ? "Migración verificada" : "Migración copiada · archivos sin verificar",
+                filesVerified
+                    ? "Expulsa la tarjeta de forma segura y comprueba el arranque en la misma consola. Conserva la original y la copia."
+                    : "Se han copiado los datos sin la comprobación final del contenido de los archivos. Expulsa la tarjeta de forma segura, pruébala en la misma consola y conserva la original y la copia.",
                 isOperationComplete: true);
+            return new RestoreResult(filesVerified);
         }
         catch (Exception ex)
         {
@@ -339,7 +358,7 @@ public sealed class BackupService
         return steps;
     }
 
-    private static IReadOnlyList<WorkStep> RestoreSteps(BackupManifest manifest)
+    private static IReadOnlyList<WorkStep> RestoreSteps(BackupManifest manifest, RestoreOptions options)
     {
         var steps = new List<WorkStep>
         {
@@ -357,7 +376,8 @@ public sealed class BackupService
         var fileBytes = manifest.Files.Sum(file => file.Length);
         steps.Add(new("mount-target", "Montar la partición de archivos", 0, WorkRateKind.None));
         steps.Add(new("copy-files", "Copiar los archivos a la tarjeta nueva", fileBytes, WorkRateKind.TargetWrite));
-        steps.Add(new("verify-files", "Verificar los archivos de la tarjeta nueva", fileBytes, WorkRateKind.TargetRead));
+        if (options.VerifyFilesAfterCopy)
+            steps.Add(new("verify-files", "Verificar los archivos de la tarjeta nueva", fileBytes, WorkRateKind.TargetRead));
         steps.Add(new("finalize", "Conservar atributos y confirmar la escritura final", 0, WorkRateKind.None));
         return steps;
     }
@@ -588,13 +608,13 @@ public sealed class BackupService
             throw new IOException("La copia debe guardarse en una unidad NTFS o exFAT del PC; FAT32 no permite las imágenes grandes de emuMMC.");
     }
 
-    private static async Task WriteStatusAsync(string path, string state, DiskInfo target, string? error)
+    private static async Task WriteStatusAsync(string path, string state, DiskInfo target, string? error, bool? filesVerified = null)
     {
         // A diagnostic failure must not hide the original I/O failure or turn an incomplete restore into success.
         try
         {
             SafePaths.RejectReparseAncestors(path);
-            var text = JsonSerializer.Serialize(new { state, timeUtc = DateTime.UtcNow, target = new { target.Number, target.FriendlyName, target.Size }, error }, JsonOptions);
+            var text = JsonSerializer.Serialize(new { state, timeUtc = DateTime.UtcNow, target = new { target.Number, target.FriendlyName, target.Size }, error, filesVerified }, JsonOptions);
             await File.WriteAllTextAsync(path, text, CancellationToken.None);
         }
         catch (IOException) { }

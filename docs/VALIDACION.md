@@ -1,10 +1,12 @@
-# Validación de ninmagic-nx 1.3.0
+# Validación de ninmagic-nx 1.4.0
 
 Fecha de preparación: 29 de octubre de 2026.
 
 ## Comprobaciones realizadas
 
-- 126 comprobaciones automáticas superadas, con destinos simulados y archivos temporales del PC.
+- 151 comprobaciones automáticas superadas, con destinos simulados y archivos temporales del PC.
+- Verificación de archivos activada por defecto; omisión explícita con 5 pasos sin RAW y 7 con una RAW. El resultado y el registro distinguen los archivos no verificados; la prueba de corrupción del destino demuestra que este modo no puede certificar su contenido.
+- En el modo sin lectura final se conservan fechas, atributos, referencias emuMMC, validación de la copia del PC, hashes durante copia y verificación RAW. Corrupción de la copia o RAW, cancelación durante el vaciado y error de vaciado final impiden un resultado completado.
 - Estimación de tiempo con reloj simulado: espera de muestras suficientes, velocidades separadas por dispositivo y sentido, cambio de fase, ralentización, ausencia de avance, recuperación, reinicio y finalización explícita.
 - Progreso de restauración con 0, 1 y 2 particiones RAW: 6, 8 y 10 pasos respectivamente. Copia con 1 y 2 RAW: 6 y 7 pasos. Comprobaciones independientes y previas de un paso.
 - Ninguna finalización anticipada ante corrupción, cancelación, error de escritura o fallo del vaciado final. La verificación interna de la copia no marca el traslado como terminado.
@@ -21,7 +23,7 @@ Fecha de preparación: 29 de octubre de 2026.
 
 ## Lo que estas pruebas no demuestran
 
-Las pruebas de esta actualización no escriben tarjetas físicas. La versión 1.3 no se ha validado todavía mediante un traslado real seguido de arranque en Nintendo Switch. Las comprobaciones simuladas no demuestran que funcionen todos los lectores, el montaje o el formateo exFAT de cualquier dispositivo real. Los datos de las pruebas anteriores de lectura de una tarjeta no sustituyen esa validación.
+Las pruebas de esta actualización no escriben tarjetas físicas. La versión 1.4 no se ha validado todavía mediante un traslado real seguido de arranque en Nintendo Switch. Las comprobaciones simuladas no demuestran que funcionen todos los lectores, el montaje o el formateo exFAT de cualquier dispositivo real. Los datos de las pruebas anteriores de lectura de una tarjeta no sustituyen esa validación.
 
 Por ello, la versión se entrega como candidata para validación física. No se afirma que funcione con cualquier lector, tarjeta o tamaño ni que esté libre de errores. Se debe conservar la tarjeta original y probar la nueva en la misma consola antes de reutilizarla o borrar la copia.
 
@@ -54,6 +56,6 @@ dotnet run --project tools/RenderUi -c Release -- artifacts/ui
 
 El proyecto `tools/InspectCard` es un diagnóstico independiente y opcional. Recibe número de disco, tamaño exacto en bytes y ruta absoluta de un informe JSON nuevo en otro disco. Requiere administrador y solo abre el origen en lectura. No llama a formateo, restauración ni sesiones de escritura. Guarda una copia mínima de las referencias y el informe en el PC; estos resultados son privados y no deben añadirse al repositorio.
 
-La versión 1.3 añade pasos y estimaciones sin nuevas lecturas para calcular el tiempo. Conserva el comportamiento de 1.2: sin prueba destructiva completa de capacidad, conversión NTFS a FAT32, validación de la copia y verificación de los datos restaurados. Las copias de formato 1, incluidas las creadas por 1.0.0, siguen siendo compatibles.
+La versión 1.3 añade pasos y estimaciones sin nuevas lecturas para calcular el tiempo. La 1.4 permite omitir la lectura final de archivos del destino, manteniendo validación de la copia, verificación RAW y conversión NTFS a FAT32. Con la opción recomendada activada mantiene todas las comprobaciones de 1.2. Ningún modo ejecuta una prueba destructiva de toda la capacidad. Las copias de formato 1, incluidas las creadas por 1.0.0, siguen siendo compatibles.
 
 `tools/BackupRunner` permite ejecutar el mismo motor de copias en segundo plano con una huella MBR, número de disco y capacidad exactos. Su adaptador rechaza obtener sesiones de escritura. Publica progreso JSON de forma atómica y solo marca `success` después de que `CreateAsync` devuelva una copia completa y verificada. El archivo `cancel.flag` junto al JSON solicita cancelación ordenada. Los informes, las copias y sus inventarios son privados y quedan fuera del repositorio.

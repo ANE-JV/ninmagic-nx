@@ -20,6 +20,8 @@ public sealed record BackupManifest(int FormatVersion, string AppVersion, DateTi
     IReadOnlyList<RawPartition> RawPartitions, IReadOnlyList<FileEntry> Files, IReadOnlyList<string> ExcludedPaths);
 public sealed record MigrationPlan(PartitionInfo DataPartition, IReadOnlyList<PartitionInfo> RawPartitions,
     IReadOnlyDictionary<uint, uint> SectorMap, long RequiredFileBytes, string FileSystem, long TargetSize);
+public sealed record RestoreOptions(bool VerifyFilesAfterCopy = true);
+public sealed record RestoreResult(bool FilesVerified);
 public enum WorkRateKind { None, PcRead, SourceRead, TargetWrite, TargetRead }
 public sealed record WorkStep(string Id, string Title, long Bytes, WorkRateKind RateKind);
 public sealed record WorkProgress(string Stage, string Detail, long Completed, long Total)

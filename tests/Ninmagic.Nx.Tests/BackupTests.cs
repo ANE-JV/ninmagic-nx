@@ -125,6 +125,63 @@ public static class BackupTests
             Check(BinaryPrimitives.ReadUInt32LittleEndian(await File.ReadAllBytesAsync(Path.Combine(sourceRoot, "emuMMC", "RAW1", "raw_based"))) == emuSector, "Referencia original intacta");
             cases += 4;
 
+            var unverifiedRoot = Path.Combine(root, "unverified-target");
+            Directory.CreateDirectory(unverifiedRoot);
+            var unverifiedDisks = new FakeDisks(source, target, unverifiedRoot);
+            var unverifiedProgress = new List<WorkProgress>();
+            var unverifiedResult = await new BackupService(unverifiedDisks).RestoreAsync(backup, target,
+                new ImmediateProgress(unverifiedProgress.Add), CancellationToken.None, new RestoreOptions(false));
+            AssertProgressFlow(unverifiedProgress, 7);
+            AssertRestoreSteps(unverifiedProgress, new[] { 2 }, false);
+            Check(!unverifiedResult.FilesVerified && unverifiedProgress.All(p => p.Stage != "Verificando archivos"),
+                "La opción sin relectura omite solo la verificación de archivos y declara su resultado");
+            Check(unverifiedDisks.TargetStream.BytesRead >= rawPart.Length &&
+                unverifiedProgress.Any(p => p.Stage == "Verificando emuMMC"),
+                "La emuMMC se relee aunque se omita la comprobación final de archivos");
+            Check(sourceBytes.SequenceEqual(await File.ReadAllBytesAsync(Path.Combine(unverifiedRoot, "switch", "prueba.nro"))) &&
+                (File.GetAttributes(Path.Combine(unverifiedRoot, "switch", "prueba.nro")) &
+                    (FileAttributes.Hidden | FileAttributes.ReadOnly | FileAttributes.Archive)) ==
+                    (FileAttributes.Hidden | FileAttributes.ReadOnly | FileAttributes.Archive) &&
+                File.GetLastWriteTimeUtc(Path.Combine(unverifiedRoot, "switch", "prueba.nro")) ==
+                    manifest.Files.Single(f => f.Path == "switch/prueba.nro").LastWriteTimeUtc,
+                "La opción sin relectura conserva contenido, atributos y fecha del archivo");
+            Check((File.GetAttributes(Path.Combine(unverifiedRoot, "Nintendo", "Contents", "split.nca")) & FileAttributes.Archive) != 0 &&
+                BinaryPrimitives.ReadUInt32LittleEndian(await File.ReadAllBytesAsync(Path.Combine(unverifiedRoot, "emuMMC", "RAW1", "raw_based"))) == plan.SectorMap[emuSector] &&
+                (await File.ReadAllTextAsync(Path.Combine(unverifiedRoot, "emuMMC", "emummc.ini"))).Contains($"sector=0x{plan.SectorMap[emuSector]:X}"),
+                "La opción sin relectura conserva Archive y actualiza las referencias emuMMC");
+            using (var unverifiedState = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(backup, "ultima-restauracion.json"))))
+                Check(unverifiedState.RootElement.GetProperty("state").GetString() == "completada-sin-verificacion-de-archivos" &&
+                    !unverifiedState.RootElement.GetProperty("filesVerified").GetBoolean(),
+                    "La restauración con RAW y sin relectura nunca se registra como totalmente verificada");
+            cases += 7;
+
+            // Corrupt a synthetic RAW just before its destination reread, with file verification disabled.
+            var badRawRoot = Path.Combine(root, "bad-raw-unverified-target");
+            Directory.CreateDirectory(badRawRoot);
+            var badRawDisks = new FakeDisks(source, target, badRawRoot);
+            var badRawProgress = new List<WorkProgress>();
+            var rawTampered = false;
+            var rawCorrupting = new ImmediateProgress(p =>
+            {
+                badRawProgress.Add(p);
+                if (!rawTampered && p.Stage == "Verificando emuMMC" && p.Completed == 0)
+                {
+                    var position = badRawDisks.TargetStream.Position;
+                    badRawDisks.TargetStream.Position = plan.RawPartitions[0].Offset;
+                    badRawDisks.TargetStream.WriteByte(0xAA);
+                    badRawDisks.TargetStream.Position = position;
+                    rawTampered = true;
+                }
+            });
+            await ExpectThrowsAsync<IOException>(() => new BackupService(badRawDisks).RestoreAsync(backup, target,
+                rawCorrupting, CancellationToken.None, new RestoreOptions(false)));
+            Check(rawTampered && badRawProgress.All(p => !p.IsOperationComplete) &&
+                badRawProgress.All(p => p.Stage != "Restaurando archivos"),
+                "Una emuMMC dañada se rechaza antes de copiar archivos incluso sin su verificación final");
+            Check((await File.ReadAllTextAsync(Path.Combine(backup, "ultima-restauracion.json"))).Contains("error-destino-incompleto"),
+                "La corrupción RAW nunca se registra como copia terminada sin verificación");
+            cases += 3;
+
             // A second small synthetic RAW checks the real alternating copy/verify sequence.
             // The disk remains sparse in memory; only 64 + 32 MiB of RAW data are copied on the PC.
             var secondRaw = new PartitionInfo(3, 0xE0, rawPart.StartSector - 65536, 65536);
@@ -222,7 +279,8 @@ public static class BackupTests
             "Solo el último reporte confirma el éxito de toda la operación");
     }
 
-    internal static void AssertRestoreSteps(IReadOnlyList<WorkProgress> reports, IReadOnlyList<int> rawPartitionNumbers)
+    internal static void AssertRestoreSteps(IReadOnlyList<WorkProgress> reports, IReadOnlyList<int> rawPartitionNumbers,
+        bool verifyFiles = true)
     {
         var expected = new List<string> { "verify-backup", "prepare-target" };
         foreach (int number in rawPartitionNumbers)
@@ -230,7 +288,9 @@ public static class BackupTests
             expected.Add($"copy-raw-{number}");
             expected.Add($"verify-raw-{number}");
         }
-        expected.AddRange(new[] { "mount-target", "copy-files", "verify-files", "finalize" });
+        expected.AddRange(new[] { "mount-target", "copy-files" });
+        if (verifyFiles) expected.Add("verify-files");
+        expected.Add("finalize");
         Check(reports[0].Steps.Select(s => s.Id).SequenceEqual(expected), "El plan refleja el orden real de restauración");
         Check(reports.Any(p => p.Steps[p.StepNumber - 1].Id == "mount-target" && !p.IsOperationComplete) &&
             reports.Any(p => p.Steps[p.StepNumber - 1].Id == "finalize" && !p.IsOperationComplete),
@@ -313,6 +373,7 @@ public static class BackupTests
         public override bool CanWrite => true;
         public override long Length => length;
         public override long Position { get; set; }
+        public long BytesRead { get; private set; }
         public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
         public override int Read(Span<byte> buffer)
         {
@@ -328,6 +389,7 @@ public static class BackupTests
                 if (pages.TryGetValue(index, out var page)) page.AsSpan(within, piece).CopyTo(buffer.Slice(done, piece));
                 Position += piece; done += piece;
             }
+            BytesRead += take;
             return take;
         }
         public override void Write(byte[] buffer, int offset, int count) => Write(buffer.AsSpan(offset, count));
