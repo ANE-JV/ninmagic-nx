@@ -1,8 +1,14 @@
-# Validación de ninmagic-nx 1.4.0
+# Validación de ninmagic-nx 1.5.0
 
 Fecha de preparación: 29 de octubre de 2026.
 
-## Comprobaciones realizadas
+## Estado de la versión 1.5
+
+Esta actualización incorpora el logo original JV en una esquina y un fondo de circuitos cian y rojos inspirado en la referencia visual del usuario. Conserva los pasos, los tiempos estimados y la elección de verificar los archivos al terminar. No añade compatibilidad Android/Linux ni reanudación de operaciones.
+
+La versión 1.5 ha superado nuevamente las 151 comprobaciones automáticas, sin fallos. Se ha compilado la interfaz y se han renderizado e inspeccionado sus pantallas a tamaño normal y mínimo, incluyendo el logo, fondo, contador y opción de verificación desactivada. El logo se incorpora como recurso de la aplicación y no depende de archivos externos. El fondo es vectorial y estático.
+
+## Comprobaciones automáticas y validaciones acumuladas
 
 - 151 comprobaciones automáticas superadas, con destinos simulados y archivos temporales del PC.
 - Verificación de archivos activada por defecto; omisión explícita con 5 pasos sin RAW y 7 con una RAW. El resultado y el registro distinguen los archivos no verificados; la prueba de corrupción del destino demuestra que este modo no puede certificar su contenido.
@@ -23,11 +29,13 @@ Fecha de preparación: 29 de octubre de 2026.
 
 ## Lo que estas pruebas no demuestran
 
-Las pruebas de esta actualización no escriben tarjetas físicas. La versión 1.4 no se ha validado todavía mediante un traslado real seguido de arranque en Nintendo Switch. Las comprobaciones simuladas no demuestran que funcionen todos los lectores, el montaje o el formateo exFAT de cualquier dispositivo real. Los datos de las pruebas anteriores de lectura de una tarjeta no sustituyen esa validación.
+El usuario ha confirmado el funcionamiento de la migración realizada con la versión 1.2 y de la tarjeta nueva en su consola. Esta confirmación corresponde a un caso de uso real de esa versión; no es una certificación universal ni una prueba física de la versión 1.5.
+
+Las pruebas automáticas de esta actualización no escriben tarjetas físicas. La versión 1.5 no se ha validado todavía mediante otro traslado real seguido de arranque en Nintendo Switch. Las comprobaciones simuladas y la confirmación del usuario no demuestran que funcionen todos los lectores, el montaje o el formateo exFAT de cualquier dispositivo real.
 
 Por ello, la versión se entrega como candidata para validación física. No se afirma que funcione con cualquier lector, tarjeta o tamaño ni que esté libre de errores. Se debe conservar la tarjeta original y probar la nueva en la misma consola antes de reutilizarla o borrar la copia.
 
-Las pruebas no contienen juegos, datos personales, claves ni imágenes NAND de una consola real. Todos los destinos de escritura de las pruebas son memoria o archivos temporales del PC.
+Las pruebas automáticas no contienen juegos, datos personales, claves ni imágenes NAND de una consola real. Todos sus destinos de escritura son memoria o archivos temporales del PC. No se incluyen datos privados de la migración confirmada por el usuario.
 
 ## Reproducir
 
@@ -56,6 +64,6 @@ dotnet run --project tools/RenderUi -c Release -- artifacts/ui
 
 El proyecto `tools/InspectCard` es un diagnóstico independiente y opcional. Recibe número de disco, tamaño exacto en bytes y ruta absoluta de un informe JSON nuevo en otro disco. Requiere administrador y solo abre el origen en lectura. No llama a formateo, restauración ni sesiones de escritura. Guarda una copia mínima de las referencias y el informe en el PC; estos resultados son privados y no deben añadirse al repositorio.
 
-La versión 1.3 añade pasos y estimaciones sin nuevas lecturas para calcular el tiempo. La 1.4 permite omitir la lectura final de archivos del destino, manteniendo validación de la copia, verificación RAW y conversión NTFS a FAT32. Con la opción recomendada activada mantiene todas las comprobaciones de 1.2. Ningún modo ejecuta una prueba destructiva de toda la capacidad. Las copias de formato 1, incluidas las creadas por 1.0.0, siguen siendo compatibles.
+La versión 1.3 añade pasos y estimaciones sin nuevas lecturas para calcular el tiempo. La 1.4 permite omitir la lectura final de archivos del destino, manteniendo validación de la copia, verificación RAW y conversión NTFS a FAT32. La 1.5 incorpora el logo original y el fondo de circuitos; conserva esas funciones y sus límites. Con la opción recomendada activada mantiene todas las comprobaciones de 1.2. Ningún modo ejecuta una prueba destructiva de toda la capacidad. Las copias de formato 1, incluidas las creadas por 1.0.0, siguen siendo compatibles.
 
 `tools/BackupRunner` permite ejecutar el mismo motor de copias en segundo plano con una huella MBR, número de disco y capacidad exactos. Su adaptador rechaza obtener sesiones de escritura. Publica progreso JSON de forma atómica y solo marca `success` después de que `CreateAsync` devuelva una copia completa y verificada. El archivo `cancel.flag` junto al JSON solicita cancelación ordenada. Los informes, las copias y sus inventarios son privados y quedan fuera del repositorio.

@@ -2,7 +2,7 @@
 
 Aplicación portable en español para Windows 10/11 de 64 bits. Permite guardar una copia verificada de una microSD con Atmosphère y emuMMC en el PC y restaurarla en una tarjeta de mayor capacidad, ampliando la partición de archivos.
 
-**Estado: versión 1.4 candidata para validación física.** La validación de arranque en una Nintendo Switch sigue pendiente. Las comprobaciones automáticas y sobre dispositivos simulados no son una garantía de ausencia de errores ni de compatibilidad con cualquier tarjeta. Conserva la original hasta verificar la nueva en tu consola.
+**Estado: versión 1.5 con personalización visual NinMagic.** El usuario ha confirmado el funcionamiento de la migración realizada con la versión 1.2 y de la tarjeta nueva en su consola. Es una confirmación de ese caso concreto; la versión 1.5 no se ha probado todavía mediante otra migración física. Las comprobaciones automáticas y sobre dispositivos simulados no son una garantía de ausencia de errores ni de compatibilidad con cualquier tarjeta. Conserva la original hasta verificar la nueva en tu consola.
 
 ## Descargar y usar
 
@@ -33,7 +33,11 @@ Se mantienen la comprobación de la copia del PC antes de borrar, los hashes cal
 
 Sin verificación final hay un paso menos y el tiempo estimado se ajusta. El resultado se identifica como **archivos sin verificar** tanto en pantalla como en el registro `ultima-restauracion.json`; nunca se certifica como una migración totalmente verificada. Un error de escritura, de vaciado o una cancelación sigue dejando el destino incompleto. La opción no permite reanudar operaciones interrumpidas.
 
-Esta actualización no incorpora todavía compatibilidad Android/Linux ni cambios de logo o fondo.
+## Aspecto NinMagic · versión 1.5
+
+La aplicación incorpora el logo original **JV** en una esquina y un fondo oscuro con circuitos cian y rojos inspirado en la referencia visual facilitada por el usuario. El logo se conserva a partir de su imagen original; el fondo se dibuja en la interfaz. Se mantienen el panel de pasos y tiempos, la descripción de la actividad y la opción de verificación final.
+
+La versión 1.5 no añade compatibilidad con tarjetas que contengan Android/Linux ni permite reanudar operaciones interrumpidas.
 
 ## Qué se conserva
 
@@ -66,7 +70,7 @@ Como origen se rechazan GPT/híbrido, Linux/Android, particiones extendidas o de
 
 La aplicación compara SHA-256 de las copias y, con la verificación final activada, de los archivos restaurados. Las particiones emuMMC RAW se comprueban siempre. Comprueba referencias emuMMC, geometría de particiones y CRC de la GPT interna de emuMMC RAW. Bloquea discos de Windows y buses internos, revalida la identidad del destino y bloquea/desmonta sus volúmenes antes de escribir. Solo informa de finalización tras completar copia, las comprobaciones elegidas y el vaciado de escritura, distinguiendo el resultado con archivos verificados del resultado sin verificar.
 
-La versión 1.2 omite la prueba previa que escribía y leía toda la capacidad del destino. Conserva la comprobación de identidad, formato y tamaño anunciado por Windows, y la verificación SHA-256 de los datos copiados. Por ello no certifica toda la capacidad física, la calidad o el rendimiento de la tarjeta. Un error al copiar o verificar se comunica y detiene el proceso. El montaje, bloqueo y formateo de dispositivos físicos de Windows todavía requieren validación práctica. No desconectes el lector durante una operación. Nunca aceptes formatear la partición oculta si Windows lo propone.
+Desde la versión 1.2 se omite la prueba previa que escribía y leía toda la capacidad del destino. Se conservan la comprobación de identidad, formato y tamaño anunciado por Windows, y las verificaciones descritas arriba. Por ello no se certifica toda la capacidad física, la calidad o el rendimiento de la tarjeta. Un error al copiar o verificar se comunica y detiene el proceso. La confirmación de funcionamiento de una migración no valida todos los lectores ni todos los dispositivos. No desconectes el lector durante una operación. Nunca aceptes formatear la partición oculta si Windows lo propone.
 
 La conversión de un destino NTFS a FAT32 se bloquea antes de escribir si la copia contiene archivos mayores de 4 GiB menos 1 byte; no se recortan ni dividen automáticamente. El límite de FAT32 es por archivo individual, no por juego: se conservan los juegos de mayor tamaño almacenados en varios archivos o partes. La preparación del destino requiere seleccionar la tarjeta y confirmar su borrado.
 
@@ -82,7 +86,7 @@ Requiere .NET SDK 8 para compilar, Windows y PowerShell para la aplicación. No 
 
 El script ejecuta las pruebas sobre dispositivos simulados y genera el ejecutable portable y el ZIP en `dist`. **No escribe en discos físicos.** La prueba opcional `--inventory` consulta dispositivos sin modificarlos. El detalle y las limitaciones están en [docs/VALIDACION.md](docs/VALIDACION.md).
 
-Para preparar otra versión mientras está ejecutándose la anterior, usa una carpeta diferente: `./tools/build.ps1 -OutputRoot dist/v1.4.0`. No reemplaces ni reinicies el ejecutable durante un traslado.
+Para preparar otra versión mientras está ejecutándose la anterior, usa una carpeta diferente: `./tools/build.ps1 -OutputRoot dist/v1.5.0`. No reemplaces ni reinicies el ejecutable durante un traslado.
 
 La implementación se divide en `Ninmagic.Nx.Core` (planificación, formatos y copias), `Ninmagic.Nx.Windows` (dispositivos y montaje) y `Ninmagic.Nx.App` (asistente WPF). Las pruebas usan discos dispersos simulados y carpetas temporales, con comprobaciones de corrupción, cancelación y preservación de metadatos.
 

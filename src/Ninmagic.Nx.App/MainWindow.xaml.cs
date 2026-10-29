@@ -220,7 +220,7 @@ public partial class MainWindow : Window
         {
             Directory.CreateDirectory(logFolder);
             logFile = Path.Combine(logFolder, $"ninmagic-nx-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
-            Log("Inicio de operación ninmagic-nx 1.4.0");
+            Log("Inicio de operación ninmagic-nx 1.5.0");
             await action(operation.Token);
         }
         catch (OperationCanceledException)

@@ -11,6 +11,7 @@
     <DebugType>embedded</DebugType>
   </PropertyGroup>
   <ItemGroup>
+    <Resource Include="Assets/ninmagic-logo.jpg" />
     <ProjectReference Include="../Ninmagic.Nx.Core/Ninmagic.Nx.Core.csproj" />
     <ProjectReference Include="../Ninmagic.Nx.Windows/Ninmagic.Nx.Windows.csproj" />
   </ItemGroup>
