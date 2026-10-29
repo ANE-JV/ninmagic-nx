@@ -20,9 +20,11 @@ public sealed class WindowsDiskAccess : IDiskAccess
                 $root = ''
                 if ($v -and $v.Path) { $root = [string]$v.Path }
                 elseif ($part.DriveLetter) { $root = [string]$part.DriveLetter + ':\' }
+                $letter = [string]$part.DriveLetter
+                if ($letter -notmatch '^[A-Za-z]$') { $letter = '' }
                 [pscustomobject]@{
                     PartitionNumber=[int]$part.PartitionNumber; Offset=[long]$part.Offset; Size=[long]$part.Size;
-                    Root=$root; FileSystem=[string]$v.FileSystemType; Label=[string]$v.FileSystemLabel
+                    Root=$root; DriveLetter=$letter; FileSystem=[string]$v.FileSystemType; Label=[string]$v.FileSystemLabel
                 }
             })
             [pscustomobject]@{

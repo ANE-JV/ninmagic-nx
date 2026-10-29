@@ -42,6 +42,8 @@ public partial class MainWindow : Window
         AdminBanner.Visibility = IsAdmin ? Visibility.Collapsed : Visibility.Visible;
         Loaded += async (_, _) =>
         {
+            InitializeSessionLog();
+            Log($"Ventana abierta · Administrador: {IsAdmin} · Demostración: {preview}");
             if (preview)
             {
                 Title += " · Vista de demostración";
@@ -60,6 +62,7 @@ public partial class MainWindow : Window
     {
         if (operation != null || preview || refreshing) return;
         refreshing = true;
+        Log("Consultando tarjetas disponibles.");
         Inputs.IsEnabled = VerificationOptions.IsEnabled = ModeButtons.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = ActionButton.IsEnabled = false;
         try
         {
@@ -69,8 +72,9 @@ public partial class MainWindow : Window
             DiskCombo.SelectedItem = available.FirstOrDefault(d => d.Identity == selected);
             if (DiskCombo.SelectedItem == null && available.Count == 1) DiskCombo.SelectedIndex = 0;
             if (available.Count == 0) DiskDetails.Text = "No hay tarjetas compatibles. Conecta un lector USB/SD y pulsa Actualizar.";
+            Log($"Consulta de tarjetas terminada: {available.Count} disponible(s).");
         }
-        catch (Exception ex) { StatusText.Text = "No se pudieron consultar las tarjetas"; ProgressDetail.Text = ex.Message; }
+        catch (Exception ex) { ShowStartNotice("No se pudieron consultar las tarjetas. " + ex.Message); Log(ex.ToString()); }
         finally { refreshing = false; Inputs.IsEnabled = VerificationOptions.IsEnabled = ModeButtons.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = ActionButton.IsEnabled = true; }
     }
 
@@ -78,6 +82,7 @@ public partial class MainWindow : Window
     {
         if (operation != null || refreshing) return;
         restoring = restore;
+        ActionNotice.Visibility = Visibility.Collapsed;
         BackupTab.Style = (Style)FindResource(restore ? typeof(Button) : "Primary");
         RestoreTab.Style = (Style)FindResource(restore ? "Primary" : typeof(Button));
         SectionTitle.Text = restore ? "Prepara tu tarjeta nueva" : "Guarda todo antes de empezar";
@@ -109,7 +114,8 @@ public partial class MainWindow : Window
     private void UpdateDiskDetails()
     {
         if (DiskDetails == null) return;
-        DiskDetails.Text = DiskCombo.SelectedItem is DiskInfo d ? $"{d.BusType} · {d.PartitionStyle} · Serie: {d.SerialNumber.Trim()} · {string.Join(" / ", d.Volumes.Select(v => $"{v.FileSystem} {v.Label}"))}" : "Selecciona la tarjeta que quieres utilizar.";
+        DiskDetails.Text = DiskCombo.SelectedItem is DiskInfo d ? $"Unidad: {d.DriveLettersDisplay} · {d.BusType} · {d.PartitionStyle}\n{string.Join(" / ", d.Volumes.Where(v => v.DriveLetterDisplay != "Sin letra asignada").Select(v => $"{v.DriveLetterDisplay} {v.FileSystem} {v.Label}"))}".TrimEnd() : "Selecciona la tarjeta que quieres utilizar.";
+        DiskDetails.ToolTip = DiskCombo.SelectedItem is DiskInfo selected ? $"Serie: {selected.SerialNumber.Trim()}" : null;
         if (restoring && DiskCombo.SelectedItem is DiskInfo target && HasNtfs(target))
             DiskDetails.Text += "\nNTFS detectado: se creará FAT32 después de confirmar el borrado.";
     }
@@ -142,9 +148,9 @@ public partial class MainWindow : Window
         progressEstimator.Reset();
         operationClock.Restart();
         StepText.Text = name + " · Preparando pasos…";
-        StatusText.Text = "Preparando operación";
+        StatusText.Text = "Inicio recibido · preparando operación";
         StatusText.Foreground = Foreground;
-        ProgressDetail.Text = "Preparando la información del proceso…";
+        ProgressDetail.Text = "Comprobando la tarjeta y la carpeta; Windows puede tardar en responder…";
         StepTimeText.Text = "Este paso: calculando…";
         TotalTimeText.Text = "Total restante: calculando…";
         ElapsedText.Text = "Transcurrido: 0 s";
@@ -172,8 +178,8 @@ public partial class MainWindow : Window
     }
     private void RenderEstimate(ProgressEstimate estimate)
     {
-        if (latestProgress is not { } p) return;
         ElapsedText.Text = "Transcurrido: " + FormatDuration(operationClock.Elapsed);
+        if (latestProgress is not { } p) return;
         if (p.IsOperationComplete)
         {
             StepTimeText.Text = "Pasos completados";
@@ -211,16 +217,16 @@ public partial class MainWindow : Window
     }
     private async Task RunAsync(string name, Func<CancellationToken, Task> action)
     {
-        if (operation != null || preview || refreshing) return;
+        if (!CanStartOperation()) return;
         operation = new CancellationTokenSource();
+        ActionNotice.Visibility = Visibility.Collapsed;
+        ActionButton.Content = "Operación en curso…";
         Inputs.IsEnabled = VerificationOptions.IsEnabled = ModeButtons.IsEnabled = ActionButton.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = false;
         CancelButton.IsEnabled = true;
         BeginProgress(name);
         try
         {
-            Directory.CreateDirectory(logFolder);
-            logFile = Path.Combine(logFolder, $"ninmagic-nx-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
-            Log("Inicio de operación ninmagic-nx 1.5.0");
+            Log("Inicio de operación ninmagic-nx 1.5.2");
             await action(operation.Token);
         }
         catch (OperationCanceledException)
@@ -235,8 +241,13 @@ public partial class MainWindow : Window
             StopProgress("Operación incompleta · revisa el error");
             StatusText.Text = "Operación detenida · No se ha completado";
             ProgressDetail.Text = ex.Message;
+            ActionNotice.Text = ex.Message;
+            ActionNotice.Visibility = Visibility.Visible;
             Log(ex.ToString());
-            MessageBox.Show(this, ex.Message + "\n\nLa operación no se ha marcado como correcta. Conserva la tarjeta original y la copia; si ya se había empezado a escribir el destino, vuelve a restaurarlo desde el principio.\n\nRegistro: " + logFile, "ninmagic-nx · Revisar operación", MessageBoxButton.OK, MessageBoxImage.Error);
+            var recovery = name == "Crear copia"
+                ? "La copia no se ha completado. La tarjeta original se abre solo para lectura. Conserva la original y vuelve a intentarlo cuando se haya resuelto el error."
+                : "La operación no se ha marcado como correcta. Conserva la tarjeta original y la copia; si ya se había empezado a escribir el destino, vuelve a restaurarlo desde el principio.";
+            MessageBox.Show(this, ex.Message + "\n\n" + recovery + "\n\nRegistro: " + logFile, "ninmagic-nx · Revisar operación", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -247,13 +258,21 @@ public partial class MainWindow : Window
             operation.Dispose(); operation = null;
             Inputs.IsEnabled = VerificationOptions.IsEnabled = ModeButtons.IsEnabled = ActionButton.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = true;
             CancelButton.IsEnabled = false;
+            ActionButton.Content = restoring ? "Comprobar copia y preparar traslado" : "Crear y verificar copia";
         }
     }
     private async void Action_Click(object sender, RoutedEventArgs e)
     {
-        if (preview) return;
-        if (!IsAdmin) { MessageBox.Show(this, "Pulsa «Abrir como administrador» y acepta la solicitud de Windows para acceder a la microSD.", "Permisos necesarios", MessageBoxButton.OK, MessageBoxImage.Information); return; }
-        if (DiskCombo.SelectedItem is not DiskInfo disk) { MessageBox.Show(this, "Selecciona una microSD.", "Falta la tarjeta"); return; }
+        InitializeSessionLog();
+        Log(restoring ? "Pulsado: preparar restauración." : "Pulsado: crear y verificar copia.");
+        if (!CanStartOperation()) return;
+        if (!IsAdmin)
+        {
+            ShowStartNotice("Faltan permisos. Pulsa «Abrir como administrador» en la parte superior y acepta la solicitud de Windows.");
+            AdminBanner.Visibility = Visibility.Visible;
+            return;
+        }
+        if (DiskCombo.SelectedItem is not DiskInfo disk) { ShowStartNotice("Selecciona una microSD en la lista antes de empezar."); return; }
         var folder = FolderText.Text.Trim();
         var restore = restoring;
         var restoreOptions = new RestoreOptions(VerifyFilesOption.IsChecked == true);
@@ -299,6 +318,8 @@ public partial class MainWindow : Window
     }
     private async void Verify_Click(object sender, RoutedEventArgs e)
     {
+        InitializeSessionLog();
+        Log("Pulsado: comprobar copia sin restaurar.");
         var folder = FolderText.Text.Trim();
         await RunAsync("Comprobar copia", async ct =>
         {
@@ -355,7 +376,7 @@ public partial class MainWindow : Window
             Process.Start(new ProcessStartInfo(executable) { UseShellExecute = true, Verb = "runas", WorkingDirectory = AppContext.BaseDirectory });
             Close();
         }
-        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223) { StatusText.Text = "Permisos de administrador no concedidos"; }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223) { ShowStartNotice("Permisos de administrador no concedidos. Pulsa «Abrir como administrador» para volver a intentarlo."); }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "No se pudo reiniciar"); }
     }
     private void Help_Click(object sender, RoutedEventArgs e) => MessageBox.Show(this,
@@ -369,6 +390,33 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception)
         { MessageBox.Show(this, ex.Message, "No se pudo abrir la carpeta de registros"); }
+    }
+    private bool CanStartOperation()
+    {
+        if (operation != null) { Log("Inicio ignorado: ya hay una operación en curso."); return false; }
+        if (preview) { ShowStartNotice("Estás en una vista de demostración. Cierra esta ventana y abre ninmagic-nx.exe normalmente."); return false; }
+        if (refreshing) { ShowStartNotice("Windows está consultando las tarjetas. Espera a que termine la búsqueda."); return false; }
+        return true;
+    }
+    private void ShowStartNotice(string message)
+    {
+        ActionNotice.Text = message;
+        ActionNotice.Visibility = Visibility.Visible;
+        StatusText.Text = "Operación sin iniciar";
+        ProgressDetail.Text = message;
+        Log(message);
+    }
+    private void InitializeSessionLog()
+    {
+        if (logFile.Length > 0) return;
+        try
+        {
+            Directory.CreateDirectory(logFolder);
+            logFile = Path.Combine(logFolder, $"ninmagic-nx-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
+            File.AppendAllText(logFile, $"{DateTimeOffset.Now:O} Sesión ninmagic-nx 1.5.2{Environment.NewLine}");
+        }
+        catch (IOException) { logFile = ""; }
+        catch (UnauthorizedAccessException) { logFile = ""; }
     }
     private void Log(string message)
     {

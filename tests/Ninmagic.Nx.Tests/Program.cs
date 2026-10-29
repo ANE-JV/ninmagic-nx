@@ -10,6 +10,7 @@ void Test(string name, Action action)
 }
 LayoutTests.Run(Test);
 ProgressEstimatorTests.Run(Test);
+DiskDisplayTests.Run(Test);
 Test("Windows adapter excludes unsafe disk identities and buses", WindowsAdapterTests.Run);
 try { total += await BackupTests.RunAsync(); }
 catch (Exception e) { failures++; Console.Error.WriteLine("FAIL backup suite\n" + e); }
