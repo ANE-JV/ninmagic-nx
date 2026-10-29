@@ -66,15 +66,30 @@ public static class TargetPolicyTests
             var tampered = payload.ToArray();
             tampered[0] ^= 0xff;
             await File.WriteAllBytesAsync(Path.Combine(backup, "files", "sample.bin"), tampered);
-            await ExpectThrowsAsync<InvalidDataException>(() => new BackupService(corrupt).RestoreAsync(backup, target, Quiet, CancellationToken.None));
+            var rejectedProgress = new List<WorkProgress>();
+            await ExpectThrowsAsync<InvalidDataException>(() => new BackupService(corrupt).RestoreAsync(backup, target,
+                new ImmediateProgress(rejectedProgress.Add), CancellationToken.None));
             Check(corrupt.OpenCount == 0 && corrupt.TargetStream.BytesWritten == 0,
                 "Same-length SHA corruption is rejected before opening the destination");
+            var unverifiedCorrupt = new FakeDisks(target, Path.Combine(root, "unverified-corrupt-target"));
+            var unverifiedRejectedProgress = new List<WorkProgress>();
+            await ExpectThrowsAsync<InvalidDataException>(() => new BackupService(unverifiedCorrupt).RestoreAsync(backup, target,
+                new ImmediateProgress(unverifiedRejectedProgress.Add), CancellationToken.None, new RestoreOptions(false)));
+            Check(unverifiedCorrupt.OpenCount == 0 && unverifiedCorrupt.TargetStream.BytesWritten == 0 &&
+                unverifiedRejectedProgress.All(p => !p.IsOperationComplete),
+                "Disabling destination rereading still rejects a corrupt backup before any writes");
             await File.WriteAllBytesAsync(Path.Combine(backup, "files", "sample.bin"), payload);
-            cases += 2;
+            Check(rejectedProgress.All(p => !p.IsOperationComplete), "A corrupt backup cannot complete the progress display");
+            cases += 5;
 
             var success = new FakeDisks(target, Path.Combine(root, "success-target"));
             var stages = new List<WorkProgress>();
-            await new BackupService(success).RestoreAsync(backup, target, new ImmediateProgress(stages.Add), CancellationToken.None);
+            var verifiedResult = await new BackupService(success).RestoreAsync(backup, target, new ImmediateProgress(stages.Add), CancellationToken.None);
+            BackupTests.AssertProgressFlow(stages, 6);
+            BackupTests.AssertRestoreSteps(stages, Array.Empty<int>());
+            Check(stages.All(p => !p.Steps.Any(s => s.Id.StartsWith("copy-raw-", StringComparison.Ordinal) ||
+                s.Id.StartsWith("verify-raw-", StringComparison.Ordinal))), "A file-only card has no phantom RAW steps");
+            cases += 3;
             Check(success.OpenCount == 1 && success.MountCount == 1 && success.Disposed && success.MountedPlan?.FileSystem == "FAT32",
                 "One target session converts NTFS to FAT32 and closes before success");
             Check(success.TargetStream.Prefix[510] == 0x55 && success.TargetStream.Prefix[511] == 0xAA && success.TargetStream.Prefix[450] == 0x0C,
@@ -86,7 +101,8 @@ public static class TargetPolicyTests
                     "Every exFAT source file is preserved on the FAT32 destination");
             Check(stages.Count(p => p.Stage == "Verificando archivos") >= manifest.Files.Count,
                 "Skipping the capacity scan must keep verification of the copied files");
-            Check(await StateIs(backup, "completada-y-verificada") && stages.Any(p => p.Stage == "Migración verificada"),
+            Check(verifiedResult.FilesVerified && await StateIs(backup, "completada-y-verificada", true) &&
+                stages.Any(p => p.Stage == "Migración verificada"),
                 "Success is recorded only after verified restoration and target disposal");
             Check(!File.Exists(Path.Combine(backup, "ultima-prueba-tarjeta.json")),
                 "Restoration must not claim a complete capacity test was performed");
@@ -101,16 +117,23 @@ public static class TargetPolicyTests
                 "A disk write failure stops before mounting and still closes the target session");
             Check(await StateIs(backup, "error-destino-incompleto") && failureStages.All(p => p.Stage != "Migración verificada"),
                 "A write error replaces prior success with incomplete destination status");
-            cases += 3;
+            Check(failureStages.All(p => !p.IsOperationComplete), "A write error never completes the progress display");
+            cases += 4;
 
             var cancelled = new FakeDisks(target, Path.Combine(root, "cancelled-target"));
             using var cts = new CancellationTokenSource();
-            var cancelling = new ImmediateProgress(p => { if (p.Stage == "Preparando destino") cts.Cancel(); });
+            var cancelledProgress = new List<WorkProgress>();
+            var cancelling = new ImmediateProgress(p =>
+            {
+                cancelledProgress.Add(p);
+                if (p.Stage == "Preparando destino") cts.Cancel();
+            });
             await ExpectThrowsAsync<OperationCanceledException>(() => new BackupService(cancelled).RestoreAsync(backup, target, cancelling, cts.Token));
             Check(cancelled.TargetStream.BytesWritten == 0 && cancelled.MountCount == 0 && cancelled.Disposed,
                 "Cancellation at destination preparation stops all disk writes");
             Check(await StateIs(backup, "cancelada-destino-incompleto"), "Cancellation cannot be recorded as success");
-            cases += 3;
+            Check(cancelledProgress.All(p => !p.IsOperationComplete), "Cancellation never completes the progress display");
+            cases += 4;
 
             var badCopy = new FakeDisks(target, Path.Combine(root, "bad-copy-target"));
             var changedCopy = false;
@@ -131,7 +154,91 @@ public static class TargetPolicyTests
                 "The destination's copied file is reread and corruption is rejected");
             Check(await StateIs(backup, "error-destino-incompleto") && verificationStages.All(p => p.Stage != "Migración verificada"),
                 "A failed copied-file hash must not emit success");
-            cases += 3;
+            Check(verificationStages.All(p => !p.IsOperationComplete), "A failed copied-file hash never completes the progress display");
+            cases += 4;
+
+            // Omitting the destination reread must be an explicit, accurately reported result.
+            // Corrupting a copied file at finalization proves that this mode does not certify it.
+            var unverified = new FakeDisks(target, Path.Combine(root, "unverified-target"));
+            var unverifiedStages = new List<WorkProgress>();
+            var unverifiedTampered = false;
+            var unverifiedReporter = new ImmediateProgress(p =>
+            {
+                unverifiedStages.Add(p);
+                if (!unverifiedTampered && p.Steps[p.StepNumber - 1].Id == "finalize")
+                {
+                    File.WriteAllBytes(Path.Combine(unverified.TargetRoot, "sample.bin"), tampered);
+                    unverifiedTampered = true;
+                }
+            });
+            var unverifiedResult = await new BackupService(unverified).RestoreAsync(backup, target,
+                unverifiedReporter, CancellationToken.None, new RestoreOptions(false));
+            BackupTests.AssertProgressFlow(unverifiedStages, 5);
+            BackupTests.AssertRestoreSteps(unverifiedStages, Array.Empty<int>(), false);
+            Check(unverifiedTampered && (await File.ReadAllBytesAsync(Path.Combine(unverified.TargetRoot, "sample.bin"))).SequenceEqual(tampered),
+                "The unverified-mode fixture contains a same-length destination corruption");
+            Check(!unverifiedResult.FilesVerified && await StateIs(backup, "completada-sin-verificacion-de-archivos", false),
+                "Unverified completion is recorded explicitly and never certified as verified");
+            Check(unverified.Disposed && unverifiedStages.All(p => p.Stage != "Verificando archivos" && p.Stage != "Migración verificada") &&
+                unverifiedStages[^1].Stage.Contains("sin verificar", StringComparison.OrdinalIgnoreCase),
+                "Skipping rereading removes its stage and labels the completed result as unverified");
+            cases += 5;
+
+            // The SHA calculated while copying remains mandatory even in unverified mode.
+            var changedSource = new FakeDisks(target, Path.Combine(root, "changed-source-target"));
+            var sourceChanged = false;
+            var changedSourceStages = new List<WorkProgress>();
+            var sourceChanging = new ImmediateProgress(p =>
+            {
+                changedSourceStages.Add(p);
+                if (!sourceChanged && p.Stage == "Preparando destino")
+                {
+                    File.WriteAllBytes(Path.Combine(backup, "files", "sample.bin"), tampered);
+                    sourceChanged = true;
+                }
+            });
+            await ExpectThrowsAsync<InvalidDataException>(() => new BackupService(changedSource).RestoreAsync(backup, target,
+                sourceChanging, CancellationToken.None, new RestoreOptions(false)));
+            Check(sourceChanged && changedSource.OpenCount == 1 && changedSourceStages.All(p => !p.IsOperationComplete) &&
+                await StateIs(backup, "error-destino-incompleto"),
+                "Unverified mode still rejects backup contents that change after the preliminary SHA check");
+            await File.WriteAllBytesAsync(Path.Combine(backup, "files", "sample.bin"), payload);
+            cases += 2;
+
+            var unverifiedCancelled = new FakeDisks(target, Path.Combine(root, "unverified-cancelled-target"));
+            using var unverifiedCts = new CancellationTokenSource();
+            var unverifiedCancelledStages = new List<WorkProgress>();
+            var unverifiedCancelling = new ImmediateProgress(p =>
+            {
+                unverifiedCancelledStages.Add(p);
+                if (p.Stage == "Preparando destino") unverifiedCts.Cancel();
+            });
+            await ExpectThrowsAsync<OperationCanceledException>(() => new BackupService(unverifiedCancelled).RestoreAsync(backup, target,
+                unverifiedCancelling, unverifiedCts.Token, new RestoreOptions(false)));
+            Check(unverifiedCancelled.TargetStream.BytesWritten == 0 && unverifiedCancelled.Disposed &&
+                unverifiedCancelledStages.All(p => !p.IsOperationComplete) && await StateIs(backup, "cancelada-destino-incompleto"),
+                "Unverified mode preserves cancellation and never reports incomplete work as success");
+            cases += 2;
+
+            var unverifiedFlushFailure = new FakeDisks(target, Path.Combine(root, "unverified-flush-error-target")) { FailFinalFlush = true };
+            var unverifiedFlushStages = new List<WorkProgress>();
+            await ExpectThrowsAsync<IOException>(() => new BackupService(unverifiedFlushFailure).RestoreAsync(backup, target,
+                new ImmediateProgress(unverifiedFlushStages.Add), CancellationToken.None, new RestoreOptions(false)));
+            Check(unverifiedFlushFailure.Disposed && unverifiedFlushStages.Any(p => p.Steps[p.StepNumber - 1].Id == "finalize") &&
+                unverifiedFlushStages.All(p => !p.IsOperationComplete) && await StateIs(backup, "error-destino-incompleto"),
+                "Unverified mode still requires a successful final volume flush");
+            cases += 2;
+
+            using var lateCts = new CancellationTokenSource();
+            var lateCancelled = new FakeDisks(target, Path.Combine(root, "unverified-late-cancel-target"))
+            { DuringFinalFlush = lateCts.Cancel };
+            var lateStages = new List<WorkProgress>();
+            await ExpectThrowsAsync<OperationCanceledException>(() => new BackupService(lateCancelled).RestoreAsync(backup, target,
+                new ImmediateProgress(lateStages.Add), lateCts.Token, new RestoreOptions(false)));
+            Check(lateCancelled.Disposed && lateStages.Any(p => p.Steps[p.StepNumber - 1].Id == "finalize") &&
+                lateStages.All(p => !p.IsOperationComplete) && await StateIs(backup, "cancelada-destino-incompleto"),
+                "Cancellation during the final flush cannot become an unverified success");
+            cases += 2;
         }
         finally
         {
@@ -144,10 +251,11 @@ public static class TargetPolicyTests
         return cases;
     }
 
-    private static async Task<bool> StateIs(string backup, string state)
+    private static async Task<bool> StateIs(string backup, string state, bool? filesVerified = null)
     {
         using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(backup, "ultima-restauracion.json")));
-        return report.RootElement.GetProperty("state").GetString() == state;
+        return report.RootElement.GetProperty("state").GetString() == state &&
+            (filesVerified is null || report.RootElement.GetProperty("filesVerified").GetBoolean() == filesVerified);
     }
 
     private static void Check(bool condition, string description)
@@ -172,6 +280,8 @@ public static class TargetPolicyTests
         public int OpenCount { get; private set; }
         public int MountCount { get; private set; }
         public bool Disposed { get; private set; }
+        public bool FailFinalFlush { get; init; }
+        public Action? DuringFinalFlush { get; init; }
         public MigrationPlan? MountedPlan { get; private set; }
         public Stream Stream => TargetStream;
         public Task<IReadOnlyList<DiskInfo>> ListDisksAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<DiskInfo>>([target]);
@@ -187,7 +297,12 @@ public static class TargetPolicyTests
             Directory.CreateDirectory(targetRoot);
             return Task.FromResult(targetRoot);
         }
-        public void Dispose() { Disposed = true; }
+        public void Dispose()
+        {
+            Disposed = true;
+            DuringFinalFlush?.Invoke();
+            if (FailFinalFlush) throw new IOException("Simulated final flush failure");
+        }
     }
 
     private sealed class TracingStream(long length) : Stream

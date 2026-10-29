@@ -1,0 +1,50 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Static vector traces keep the reference's cyan/red circuit motif crisp at any DPI. -->
+  <DrawingBrush x:Key="CircuitBackground" Stretch="Fill" Viewbox="0,0,1280,900" ViewboxUnits="Absolute">
+    <DrawingBrush.Drawing>
+      <DrawingGroup>
+        <GeometryDrawing Brush="#080C13" Geometry="M0,0 H1280 V900 H0 Z"/>
+        <GeometryDrawing Geometry="M0,0 H1280 V900 H0 Z">
+          <GeometryDrawing.Brush>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0.8">
+              <GradientStop Color="#1B007F9C" Offset="0"/>
+              <GradientStop Color="#00080C13" Offset="0.43"/>
+              <GradientStop Color="#00080C13" Offset="0.65"/>
+              <GradientStop Color="#15E52450" Offset="1"/>
+            </LinearGradientBrush>
+          </GeometryDrawing.Brush>
+        </GeometryDrawing>
+        <GeometryDrawing Geometry="M0,36 H210 L264,90 H350 L410,150 V228 L470,288 H566 V420 M0,52 H202 L256,106 H342 L394,158 V236 L454,296 H550 V420 M0,68 H194 L248,122 H334 L378,166 V244 L438,304 H534 V420 M365,0 V63 L430,128 V190 L510,270 V375 M382,0 V55 L446,119 V182 L526,262 V375 M399,0 V47 L462,110 V174 L542,254 V375 M0,260 H86 L138,312 H242 L294,364 V434 L357,497 H496 M0,278 H78 L130,330 H234 L276,372 V442 L349,515 H496 M0,296 H70 L122,348 H226 L258,380 V450 L341,533 H496">
+          <GeometryDrawing.Pen><Pen Brush="#24495F72" Thickness="1.3" LineJoin="Round"/></GeometryDrawing.Pen>
+        </GeometryDrawing>
+        <GeometryDrawing Geometry="M1280,40 H1070 L1016,94 H938 L870,162 V232 L810,292 H714 V420 M1280,57 H1078 L1024,111 H946 L886,170 V240 L826,308 H730 V420 M1280,74 H1086 L1032,128 H954 L902,178 V248 L842,324 H746 V420 M918,0 V50 L850,118 V185 L770,265 V376 M901,0 V42 L834,110 V177 L754,257 V376 M884,0 V34 L818,102 V169 L738,249 V376 M1280,280 H1176 L1112,344 H1018 L970,392 V470 L907,533 H776 M1280,298 H1184 L1120,362 H1026 L988,400 V478 L915,551 H776 M1280,316 H1192 L1128,380 H1034 L1006,408 V486 L923,569 H776">
+          <GeometryDrawing.Pen><Pen Brush="#244C3D57" Thickness="1.3" LineJoin="Round"/></GeometryDrawing.Pen>
+        </GeometryDrawing>
+        <GeometryDrawing Geometry="M0,640 H144 L206,578 H328 L390,516 H488 M0,658 H152 L214,596 H336 L398,534 H488 M0,676 H160 L222,614 H344 L406,552 H488 M84,900 V804 L160,728 H324 L410,642 H548 V526 M103,900 V812 L168,746 H332 L428,650 H566 V526 M122,900 V820 L176,764 H340 L446,658 H584 V526 M486,900 V786 L536,736 V638 L600,574 M505,900 V794 L555,744 V646 L616,585 M524,900 V802 L574,752 V654 L632,596">
+          <GeometryDrawing.Pen><Pen Brush="#26405F6B" Thickness="1.2" LineJoin="Round"/></GeometryDrawing.Pen>
+        </GeometryDrawing>
+        <GeometryDrawing Geometry="M1280,638 H1146 L1084,576 H962 L900,514 H802 M1280,656 H1138 L1076,594 H954 L892,532 H802 M1280,674 H1130 L1068,612 H946 L884,550 H802 M1194,900 V804 L1118,728 H954 L868,642 H730 V526 M1175,900 V812 L1110,746 H946 L850,650 H712 V526 M1156,900 V820 L1102,764 H938 L832,658 H694 V526 M794,900 V786 L744,736 V638 L680,574 M775,900 V794 L725,744 V646 L664,585 M756,900 V802 L706,752 V654 L648,596">
+          <GeometryDrawing.Pen><Pen Brush="#284B3C51" Thickness="1.2" LineJoin="Round"/></GeometryDrawing.Pen>
+        </GeometryDrawing>
+        <GeometryDrawing Geometry="M0,174 H122 L162,134 H242 L278,170 H330 M0,334 H60 L102,376 H214 L256,418 V492 M504,0 V104 L464,144 V232 M0,746 H166 L216,696 H364 L440,620 H504 M556,900 V830 L604,782 V676">
+          <GeometryDrawing.Pen><Pen Brush="#3800C8EB" Thickness="2.2" LineJoin="Round"/></GeometryDrawing.Pen>
+        </GeometryDrawing>
+        <GeometryDrawing Geometry="M1280,198 H1168 L1128,158 H1050 L1014,194 H964 M1280,398 H1218 L1176,440 H1064 L1022,482 V548 M776,0 V82 L816,122 V216 M1280,774 H1114 L1064,724 H916 L840,648 H776 M724,900 V850 L676,802 V694">
+          <GeometryDrawing.Pen><Pen Brush="#3AFF315E" Thickness="2.2" LineJoin="Round"/></GeometryDrawing.Pen>
+        </GeometryDrawing>
+        <GeometryDrawing Brush="#6000C8EB">
+          <GeometryDrawing.Geometry><GeometryGroup><EllipseGeometry Center="330,170" RadiusX="3" RadiusY="3"/><EllipseGeometry Center="256,492" RadiusX="3" RadiusY="3"/><EllipseGeometry Center="504,620" RadiusX="3" RadiusY="3"/><EllipseGeometry Center="604,676" RadiusX="3" RadiusY="3"/></GeometryGroup></GeometryDrawing.Geometry>
+        </GeometryDrawing>
+        <GeometryDrawing Brush="#60FF315E">
+          <GeometryDrawing.Geometry><GeometryGroup><EllipseGeometry Center="964,194" RadiusX="3" RadiusY="3"/><EllipseGeometry Center="1022,548" RadiusX="3" RadiusY="3"/><EllipseGeometry Center="776,648" RadiusX="3" RadiusY="3"/><EllipseGeometry Center="676,694" RadiusX="3" RadiusY="3"/></GeometryGroup></GeometryDrawing.Geometry>
+        </GeometryDrawing>
+        <GeometryDrawing Geometry="M2,20 V880">
+          <GeometryDrawing.Pen><Pen Brush="#9000CCE9" Thickness="3"/></GeometryDrawing.Pen>
+        </GeometryDrawing>
+        <GeometryDrawing Geometry="M1278,20 V880">
+          <GeometryDrawing.Pen><Pen Brush="#90FF315E" Thickness="3"/></GeometryDrawing.Pen>
+        </GeometryDrawing>
+      </DrawingGroup>
+    </DrawingBrush.Drawing>
+  </DrawingBrush>
+</ResourceDictionary>
