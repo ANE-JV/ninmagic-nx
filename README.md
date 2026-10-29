@@ -2,7 +2,7 @@
 
 Aplicación portable en español para Windows 10/11 de 64 bits. Permite guardar una copia verificada de una microSD con Atmosphère y emuMMC en el PC y restaurarla en una tarjeta de mayor capacidad, ampliando la partición de archivos.
 
-**Estado: versión 1.2 candidata para validación física.** La compilación, las pruebas automáticas y las pruebas sobre imágenes de disco han pasado. Se ha inspeccionado una tarjeta original real en modo de solo lectura; todavía no se ha restaurado una tarjeta física ni arrancado una Nintendo Switch con ella. Esto no es una garantía de ausencia de errores ni de compatibilidad con cualquier tarjeta. Conserva la original hasta verificar la nueva en tu consola.
+**Estado: versión 1.3 candidata para validación física.** La validación de arranque en una Nintendo Switch sigue pendiente. Las comprobaciones automáticas y sobre dispositivos simulados no son una garantía de ausencia de errores ni de compatibilidad con cualquier tarjeta. Conserva la original hasta verificar la nueva en tu consola.
 
 ## Descargar y usar
 
@@ -16,6 +16,16 @@ El ejecutable portable `ninmagic-nx.exe` se encuentra en [Releases](https://gith
 6. La aplicación prepara las particiones y restaura tus datos. Si el destino estaba en NTFS, lo prepara en FAT32. Se releen y verifican los archivos y la emuMMC copiados. Espera a **Traslado terminado y verificado**. Expulsa la tarjeta de forma segura, insértala en la **misma consola** y comprueba el arranque, los juegos y las partidas. Conserva la original y la copia del PC.
 
 **Todo el contenido anterior de la tarjeta de destino se elimina.** La aplicación abre la tarjeta original solo para lectura y no la formatea. Una cancelación o un error deja el destino incompleto; vuelve a restaurarlo desde el principio. Las copias incompletas no se aceptan como origen.
+
+## Pasos y tiempo estimado · versión 1.3
+
+Durante cada operación se muestra **Paso N de total**, su descripción y el archivo o la partición que se está copiando o comprobando. La barra representa el paso actual: llegar al 100 % de un paso no significa que haya terminado todo el traslado. La restauración tiene 6 pasos sin particiones emuMMC RAW y añade dos por cada partición RAW (copiarla y verificarla). La comprobación previa a la confirmación del borrado es una operación separada de un paso.
+
+El panel muestra el tiempo transcurrido, el **tiempo restante del paso** y el **total restante estimado**. Se calculan con el avance observado, sin hacer pruebas adicionales sobre la tarjeta. Las velocidades de lectura del PC, lectura de microSD y escritura de microSD se mantienen separadas. Al principio, o cuando falta medir una de las velocidades necesarias, aparece «Calculando…». Si deja de llegar avance se retira la estimación hasta que haya nuevas mediciones; no se interpreta por sí solo como un error.
+
+Los tiempos son aproximados: los archivos pequeños, el lector y las tareas de montaje, atributos y vaciado pueden cambiarlos. En estos últimos pasos se indica una duración variable. El reloj se pausa al pedir confirmación y se reinicia al comenzar el traslado. Solo se indica que todo ha terminado cuando se completa también el vaciado final de escritura. Una cancelación o un error nunca se presenta como éxito.
+
+Esta actualización cambia la información de progreso; no incorpora todavía compatibilidad Android/Linux ni promete una reducción del tiempo de copia.
 
 ## Qué se conserva
 
@@ -63,6 +73,8 @@ Requiere .NET SDK 8 para compilar, Windows y PowerShell para la aplicación. No 
 ```
 
 El script ejecuta las pruebas sobre dispositivos simulados y genera el ejecutable portable y el ZIP en `dist`. **No escribe en discos físicos.** La prueba opcional `--inventory` consulta dispositivos sin modificarlos. El detalle y las limitaciones están en [docs/VALIDACION.md](docs/VALIDACION.md).
+
+Para preparar otra versión mientras está ejecutándose la anterior, usa una carpeta diferente: `./tools/build.ps1 -OutputRoot dist/v1.3.0`. No reemplaces ni reinicies el ejecutable durante un traslado.
 
 La implementación se divide en `Ninmagic.Nx.Core` (planificación, formatos y copias), `Ninmagic.Nx.Windows` (dispositivos y montaje) y `Ninmagic.Nx.App` (asistente WPF). Las pruebas usan discos dispersos simulados y carpetas temporales, con comprobaciones de corrupción, cancelación y preservación de metadatos.
 

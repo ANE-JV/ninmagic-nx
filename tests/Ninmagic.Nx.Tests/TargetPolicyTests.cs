@@ -66,15 +66,23 @@ public static class TargetPolicyTests
             var tampered = payload.ToArray();
             tampered[0] ^= 0xff;
             await File.WriteAllBytesAsync(Path.Combine(backup, "files", "sample.bin"), tampered);
-            await ExpectThrowsAsync<InvalidDataException>(() => new BackupService(corrupt).RestoreAsync(backup, target, Quiet, CancellationToken.None));
+            var rejectedProgress = new List<WorkProgress>();
+            await ExpectThrowsAsync<InvalidDataException>(() => new BackupService(corrupt).RestoreAsync(backup, target,
+                new ImmediateProgress(rejectedProgress.Add), CancellationToken.None));
             Check(corrupt.OpenCount == 0 && corrupt.TargetStream.BytesWritten == 0,
                 "Same-length SHA corruption is rejected before opening the destination");
             await File.WriteAllBytesAsync(Path.Combine(backup, "files", "sample.bin"), payload);
-            cases += 2;
+            Check(rejectedProgress.All(p => !p.IsOperationComplete), "A corrupt backup cannot complete the progress display");
+            cases += 3;
 
             var success = new FakeDisks(target, Path.Combine(root, "success-target"));
             var stages = new List<WorkProgress>();
             await new BackupService(success).RestoreAsync(backup, target, new ImmediateProgress(stages.Add), CancellationToken.None);
+            BackupTests.AssertProgressFlow(stages, 6);
+            BackupTests.AssertRestoreSteps(stages, Array.Empty<int>());
+            Check(stages.All(p => !p.Steps.Any(s => s.Id.StartsWith("copy-raw-", StringComparison.Ordinal) ||
+                s.Id.StartsWith("verify-raw-", StringComparison.Ordinal))), "A file-only card has no phantom RAW steps");
+            cases += 3;
             Check(success.OpenCount == 1 && success.MountCount == 1 && success.Disposed && success.MountedPlan?.FileSystem == "FAT32",
                 "One target session converts NTFS to FAT32 and closes before success");
             Check(success.TargetStream.Prefix[510] == 0x55 && success.TargetStream.Prefix[511] == 0xAA && success.TargetStream.Prefix[450] == 0x0C,
@@ -101,16 +109,23 @@ public static class TargetPolicyTests
                 "A disk write failure stops before mounting and still closes the target session");
             Check(await StateIs(backup, "error-destino-incompleto") && failureStages.All(p => p.Stage != "Migración verificada"),
                 "A write error replaces prior success with incomplete destination status");
-            cases += 3;
+            Check(failureStages.All(p => !p.IsOperationComplete), "A write error never completes the progress display");
+            cases += 4;
 
             var cancelled = new FakeDisks(target, Path.Combine(root, "cancelled-target"));
             using var cts = new CancellationTokenSource();
-            var cancelling = new ImmediateProgress(p => { if (p.Stage == "Preparando destino") cts.Cancel(); });
+            var cancelledProgress = new List<WorkProgress>();
+            var cancelling = new ImmediateProgress(p =>
+            {
+                cancelledProgress.Add(p);
+                if (p.Stage == "Preparando destino") cts.Cancel();
+            });
             await ExpectThrowsAsync<OperationCanceledException>(() => new BackupService(cancelled).RestoreAsync(backup, target, cancelling, cts.Token));
             Check(cancelled.TargetStream.BytesWritten == 0 && cancelled.MountCount == 0 && cancelled.Disposed,
                 "Cancellation at destination preparation stops all disk writes");
             Check(await StateIs(backup, "cancelada-destino-incompleto"), "Cancellation cannot be recorded as success");
-            cases += 3;
+            Check(cancelledProgress.All(p => !p.IsOperationComplete), "Cancellation never completes the progress display");
+            cases += 4;
 
             var badCopy = new FakeDisks(target, Path.Combine(root, "bad-copy-target"));
             var changedCopy = false;
@@ -131,7 +146,8 @@ public static class TargetPolicyTests
                 "The destination's copied file is reread and corruption is rejected");
             Check(await StateIs(backup, "error-destino-incompleto") && verificationStages.All(p => p.Stage != "Migración verificada"),
                 "A failed copied-file hash must not emit success");
-            cases += 3;
+            Check(verificationStages.All(p => !p.IsOperationComplete), "A failed copied-file hash never completes the progress display");
+            cases += 4;
         }
         finally
         {

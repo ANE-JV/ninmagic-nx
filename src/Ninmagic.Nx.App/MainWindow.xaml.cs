@@ -5,6 +5,7 @@ using System.Security.Principal;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using Ninmagic.Nx.Core;
 using Ninmagic.Nx.Windows;
@@ -24,11 +25,18 @@ public partial class MainWindow : Window
     private string logFile = "";
     private string lastStage = "";
     private long lastProgressTick;
+    private int lastStepNumber;
+    private int progressGeneration;
+    private readonly Stopwatch operationClock = new();
+    private readonly ProgressEstimator progressEstimator = new();
+    private readonly DispatcherTimer progressTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private WorkProgress? latestProgress;
     private static bool IsAdmin => new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
 
     public MainWindow()
     {
         InitializeComponent();
+        progressTimer.Tick += (_, _) => RenderEstimate(progressEstimator.Tick(operationClock.Elapsed));
         service = new BackupService(disks);
         FolderText.Text = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         AdminBanner.Visibility = IsAdmin ? Visibility.Collapsed : Visibility.Visible;
@@ -104,41 +112,117 @@ public partial class MainWindow : Window
         if (Directory.Exists(FolderText.Text)) dialog.InitialDirectory = FolderText.Text;
         if (dialog.ShowDialog(this) == true) FolderText.Text = dialog.FolderName;
     }
-    private IProgress<WorkProgress> ProgressReporter => new Progress<WorkProgress>(p =>
+    private IProgress<WorkProgress> ProgressReporter
     {
-        if (operation == null) return;
+        get
+        {
+            var generation = progressGeneration;
+            return new Progress<WorkProgress>(p =>
+            {
+                if (operation != null && generation == progressGeneration) DisplayProgress(p);
+            });
+        }
+    }
+    private void BeginProgress(string name)
+    {
+        progressGeneration++;
+        latestProgress = null;
+        lastStage = "";
+        lastStepNumber = 0;
+        lastProgressTick = 0;
+        progressEstimator.Reset();
+        operationClock.Restart();
+        StepText.Text = name + " · Preparando pasos…";
+        StatusText.Text = "Preparando operación";
+        ProgressDetail.Text = "Preparando la información del proceso…";
+        StepTimeText.Text = "Este paso: calculando…";
+        TotalTimeText.Text = "Total restante: calculando…";
+        ElapsedText.Text = "Transcurrido: 0 s";
+        TimingPanel.Visibility = EstimateNote.Visibility = Visibility.Visible;
+        Progress.IsIndeterminate = true;
+        progressTimer.Start();
+    }
+    private void DisplayProgress(WorkProgress p)
+    {
+        latestProgress = p;
+        var estimate = progressEstimator.Update(p, operationClock.Elapsed);
         var now = Environment.TickCount64;
-        if (p.Stage == lastStage && now - lastProgressTick < 100 && p.Completed != p.Total) return;
+        if (p.Stage == lastStage && p.StepNumber == lastStepNumber && now - lastProgressTick < 100 && p.Completed != p.Total) return;
         lastProgressTick = now;
-        Progress.IsIndeterminate = p.Total <= 0;
-        Progress.Value = p.Fraction * 100;
-        StatusText.Text = p.Stage;
-        ProgressDetail.Text = p.Total > 0 ? $"{p.Fraction:P0} · {p.Detail}" : p.Detail;
+        lastStepNumber = p.StepNumber;
+        Progress.IsIndeterminate = !p.IsOperationComplete && p.Total <= 0;
+        Progress.Value = p.IsOperationComplete ? 100 : p.Fraction * 100;
+        var step = p.StepNumber > 0 && p.StepNumber <= p.Steps.Count ? p.Steps[p.StepNumber - 1] : null;
+        StepText.Text = step != null ? $"{p.Operation} · Paso {p.StepNumber} de {p.Steps.Count}" : p.Operation;
+        StatusText.Text = p.IsOperationComplete ? p.Stage : step?.Title ?? p.Stage;
+        ProgressDetail.Text = p.Total > 0 && !p.IsOperationComplete ? $"{p.Fraction:P0} del paso · {p.Detail}" : p.Detail;
+        ProgressDetail.ToolTip = p.Detail;
+        RenderEstimate(estimate);
         if (lastStage != p.Stage) { Log(p.Stage); lastStage = p.Stage; }
-    });
-    private async Task RunAsync(Func<CancellationToken, Task> action)
+    }
+    private void RenderEstimate(ProgressEstimate estimate)
+    {
+        if (latestProgress is not { } p) return;
+        ElapsedText.Text = "Transcurrido: " + FormatDuration(operationClock.Elapsed);
+        if (p.IsOperationComplete)
+        {
+            StepTimeText.Text = "Pasos completados";
+            TotalTimeText.Text = "Tiempo restante: 0 s";
+            return;
+        }
+        StepTimeText.Text = p.Total <= 0 ? "Este paso: duración variable" :
+            estimate.IsStalled ? "Este paso: recalculando al avanzar…" :
+            p.Completed >= p.Total ? "Completando este paso…" :
+            estimate.StepRemaining is { } remaining ? "Este paso: ≈ " + FormatDuration(remaining) : "Este paso: calculando…";
+        TotalTimeText.Text = estimate.OperationRemaining is { } total ? "Total restante: ≈ " + FormatDuration(total) : "Total restante: calculando…";
+    }
+    private static string FormatDuration(TimeSpan duration)
+    {
+        var seconds = (long)Math.Max(0, Math.Ceiling(duration.TotalSeconds));
+        if (seconds >= 3600) return $"{seconds / 3600} h {seconds / 60 % 60:00} min {seconds % 60:00} s";
+        if (seconds >= 60) return $"{seconds / 60} min {seconds % 60:00} s";
+        return $"{seconds} s";
+    }
+    private void StopProgress(string message, bool completed = false)
+    {
+        progressGeneration++;
+        progressTimer.Stop();
+        operationClock.Stop();
+        Progress.IsIndeterminate = false;
+        if (completed)
+        {
+            Progress.Value = 100;
+            if (latestProgress is { Steps.Count: > 0 } last)
+                StepText.Text = $"{last.Operation} · Paso {last.Steps.Count} de {last.Steps.Count}";
+        }
+        StepTimeText.Text = message;
+        TotalTimeText.Text = completed ? "Tiempo restante: 0 s" : "";
+        ElapsedText.Text = "Transcurrido: " + FormatDuration(operationClock.Elapsed);
+    }
+    private async Task RunAsync(string name, Func<CancellationToken, Task> action)
     {
         if (operation != null || preview || refreshing) return;
         operation = new CancellationTokenSource();
         Inputs.IsEnabled = ModeButtons.IsEnabled = ActionButton.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = false;
         CancelButton.IsEnabled = true;
-        Progress.IsIndeterminate = true;
-        lastStage = "";
+        BeginProgress(name);
         try
         {
             Directory.CreateDirectory(logFolder);
             logFile = Path.Combine(logFolder, $"ninmagic-nx-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
-            Log("Inicio de operación ninmagic-nx 1.2.0");
+            Log("Inicio de operación ninmagic-nx 1.3.0");
             await action(operation.Token);
         }
         catch (OperationCanceledException)
         {
+            StopProgress("Operación incompleta · cancelada");
             StatusText.Text = "Operación cancelada";
             ProgressDetail.Text = "La original y la copia terminada se conservan. Un destino interrumpido no está listo para usar.";
             Log("Cancelado; destino o copia en curso incompletos.");
         }
         catch (Exception ex)
         {
+            StopProgress("Operación incompleta · revisa el error");
             StatusText.Text = "Operación detenida · No se ha completado";
             ProgressDetail.Text = ex.Message;
             Log(ex.ToString());
@@ -146,6 +230,9 @@ public partial class MainWindow : Window
         }
         finally
         {
+            progressTimer.Stop();
+            operationClock.Stop();
+            progressGeneration++;
             Progress.IsIndeterminate = false;
             operation.Dispose(); operation = null;
             Inputs.IsEnabled = ModeButtons.IsEnabled = ActionButton.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = true;
@@ -159,7 +246,7 @@ public partial class MainWindow : Window
         if (DiskCombo.SelectedItem is not DiskInfo disk) { MessageBox.Show(this, "Selecciona una microSD.", "Falta la tarjeta"); return; }
         var folder = FolderText.Text.Trim();
         var restore = restoring;
-        await RunAsync(async ct =>
+        await RunAsync(restore ? "Comprobar copia" : "Crear copia", async ct =>
         {
             if (!restore)
             {
@@ -167,6 +254,7 @@ public partial class MainWindow : Window
                 var target = Path.Combine(folder, $"ninmagic-nx-copia-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..6]}");
                 var reporter = ProgressReporter;
                 var manifest = await Task.Run(() => service.CreateAsync(disk, target, reporter, ct), ct);
+                StopProgress("Todos los pasos completados", true);
                 lastBackup = target;
                 Progress.Value = 100;
                 StatusText.Text = "Copia terminada y verificada";
@@ -179,9 +267,13 @@ public partial class MainWindow : Window
                 var reporter = ProgressReporter;
                 var plan = await Task.Run(() => service.PlanAsync(folder, disk, reporter, ct), ct);
                 ct.ThrowIfCancellationRequested();
-                Progress.IsIndeterminate = false;
-                if (!ConfirmErase(disk, plan)) { StatusText.Text = "Restauración sin iniciar"; ProgressDetail.Text = "No has confirmado el borrado de la tarjeta de destino."; return; }
-                await Task.Run(() => service.RestoreAsync(folder, disk, reporter, ct), ct);
+                StopProgress("En pausa · esperando tu confirmación");
+                StepText.Text = "Comprobación previa terminada · Confirmar tarjeta";
+                if (!ConfirmErase(disk, plan)) { StopProgress("Restauración sin iniciar"); StatusText.Text = "Restauración sin iniciar"; ProgressDetail.Text = "No has confirmado el borrado de la tarjeta de destino."; return; }
+                BeginProgress("Restaurar tarjeta");
+                var restoreReporter = ProgressReporter;
+                await Task.Run(() => service.RestoreAsync(folder, disk, restoreReporter, ct), ct);
+                StopProgress("Todos los pasos completados", true);
                 Progress.Value = 100;
                 StatusText.Text = "Traslado terminado y verificado";
                 ProgressDetail.Text = "Expulsa la tarjeta de forma segura y pruébala en la misma consola. Conserva la original.";
@@ -193,10 +285,11 @@ public partial class MainWindow : Window
     private async void Verify_Click(object sender, RoutedEventArgs e)
     {
         var folder = FolderText.Text.Trim();
-        await RunAsync(async ct =>
+        await RunAsync("Comprobar copia", async ct =>
         {
             var reporter = ProgressReporter;
             var manifest = await Task.Run(() => service.LoadAndVerifyAsync(folder, reporter, ct), ct);
+            StopProgress("Comprobación completada", true);
             Progress.Value = 100; StatusText.Text = "Integridad de la copia comprobada";
             ProgressDetail.Text = $"{manifest.Files.Count(f => !f.IsDirectory):N0} archivos · {manifest.RawPartitions.Count} partición(es) emuMMC · SHA-256 correcto.";
             Log("Verificación correcta: " + folder);
@@ -226,6 +319,7 @@ public partial class MainWindow : Window
     }
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
+        StopProgress("Cancelando · esperando que se detenga la operación");
         operation?.Cancel(); CancelButton.IsEnabled = false; StatusText.Text = "Cancelando de forma ordenada…";
     }
     private void OnClosing(object? sender, CancelEventArgs e)

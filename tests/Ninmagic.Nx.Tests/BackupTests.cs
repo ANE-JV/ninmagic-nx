@@ -53,7 +53,8 @@ public static class BackupTests
             var sourceBytes = await File.ReadAllBytesAsync(Path.Combine(sourceRoot, "switch", "prueba.nro"));
             var service = new BackupService(fake);
 
-            var manifest = await service.CreateAsync(source, backup, Quiet, CancellationToken.None);
+            var backupProgress = new List<WorkProgress>();
+            var manifest = await service.CreateAsync(source, backup, new ImmediateProgress(backupProgress.Add), CancellationToken.None);
             Check(File.Exists(Path.Combine(backup, "manifest.json")), "Manifiesto terminado");
             Check(!File.Exists(Path.Combine(backup, "COPIA-INCOMPLETA.txt")), "Marca incompleta retirada");
             Check(manifest.Files.Count(f => !f.IsDirectory) == 5, "Todos los archivos incluidos");
@@ -61,14 +62,25 @@ public static class BackupTests
             Check(manifest.Files.Single(f => f.Path == "Nintendo/Contents/split.nca").Attributes.HasFlagValue(FileAttributes.Archive), "Archive de directorio conservado");
             Check(sourceBytes.SequenceEqual(await File.ReadAllBytesAsync(Path.Combine(sourceRoot, "switch", "prueba.nro"))), "Origen intacto");
             cases += 6;
+            AssertProgressFlow(backupProgress, 6);
+            Check(backupProgress.Any(p => p.Steps[p.StepNumber - 1].Id == "check-source") &&
+                backupProgress.Any(p => p.Steps[p.StepNumber - 1].Id == "save-manifest"),
+                "La copia muestra la revisión del origen y la escritura final del manifiesto");
+            Check(backupProgress.Any(p => p.Detail == "empty.bin" && p.Total >= 0),
+                "Un archivo vacío conserva una descripción de actividad válida");
+            cases += 3;
 
             await ExpectThrowsAsync<IOException>(() => service.CreateAsync(source, backup, Quiet, CancellationToken.None));
             cases++;
-            await service.LoadAndVerifyAsync(backup, Quiet, CancellationToken.None);
-            var plan = await service.PlanAsync(backup, target, Quiet, CancellationToken.None);
+            var verificationProgress = new List<WorkProgress>();
+            await service.LoadAndVerifyAsync(backup, new ImmediateProgress(verificationProgress.Add), CancellationToken.None);
+            AssertProgressFlow(verificationProgress, 1);
+            var planProgress = new List<WorkProgress>();
+            var plan = await service.PlanAsync(backup, target, new ImmediateProgress(planProgress.Add), CancellationToken.None);
+            AssertProgressFlow(planProgress, 1);
             Check(plan.DataPartition.Length > data.Length, "Espacio ampliado");
             Check(fake.OpenTargetCount == 0, "Analizar no escribe destino");
-            cases += 3;
+            cases += 5;
 
             BackupService.ValidateManifest(manifest);
             ExpectThrows<InvalidDataException>(() => BackupService.ValidateManifest(manifest with { Files = manifest.Files.Concat([manifest.Files[0]]).ToArray() }));
@@ -94,7 +106,11 @@ public static class BackupTests
             using (var raw = new FileStream(rawBackup, FileMode.Open, FileAccess.Write)) raw.WriteByte(0);
             cases += 2;
 
-            await service.RestoreAsync(backup, target, Quiet, CancellationToken.None);
+            var restoreProgress = new List<WorkProgress>();
+            await service.RestoreAsync(backup, target, new ImmediateProgress(restoreProgress.Add), CancellationToken.None);
+            AssertProgressFlow(restoreProgress, 8);
+            AssertRestoreSteps(restoreProgress, new[] { 2 });
+            cases += 2;
             Check(fake.OpenTargetCount == 1, "Una única sesión de destino");
             Check(sourceBytes.SequenceEqual(await File.ReadAllBytesAsync(Path.Combine(targetRoot, "switch", "prueba.nro"))), "Copia de archivos exacta");
             Check((File.GetAttributes(Path.Combine(targetRoot, "switch", "prueba.nro")) & (FileAttributes.Hidden | FileAttributes.ReadOnly | FileAttributes.Archive)) == (FileAttributes.Hidden | FileAttributes.ReadOnly | FileAttributes.Archive), "Atributos de archivo exactos");
@@ -109,13 +125,50 @@ public static class BackupTests
             Check(BinaryPrimitives.ReadUInt32LittleEndian(await File.ReadAllBytesAsync(Path.Combine(sourceRoot, "emuMMC", "RAW1", "raw_based"))) == emuSector, "Referencia original intacta");
             cases += 4;
 
+            // A second small synthetic RAW checks the real alternating copy/verify sequence.
+            // The disk remains sparse in memory; only 64 + 32 MiB of RAW data are copied on the PC.
+            var secondRaw = new PartitionInfo(3, 0xE0, rawPart.StartSector - 65536, 65536);
+            var multiData = data with { SectorCount = secondRaw.StartSector - data.StartSector };
+            var multiSource = source with
+            {
+                Volumes = [new(1, multiData.Offset, multiData.Length, sourceRoot, "FAT32", "NINMAGIC")]
+            };
+            var multiTargetRoot = Path.Combine(root, "multi-target");
+            Directory.CreateDirectory(multiTargetRoot);
+            var multiDisks = new FakeDisks(multiSource, target, multiTargetRoot);
+            DiskLayout.WriteMbr(multiDisks.SourceStream,
+                new(multiData, [rawPart, secondRaw], new Dictionary<uint, uint>(), 0, "FAT32", source.Size));
+            Fat32Formatter.Format(multiDisks.SourceStream, multiData, "NINMAGIC", CancellationToken.None);
+            WriteSyntheticNand(multiDisks.SourceStream, emuSector);
+            WriteSyntheticNand(multiDisks.SourceStream, secondRaw.StartSector + 0x8000);
+            var multiBackup = Path.Combine(root, "multi-backup");
+            var multiService = new BackupService(multiDisks);
+            var multiBackupProgress = new List<WorkProgress>();
+            var multiManifest = await multiService.CreateAsync(multiSource, multiBackup,
+                new ImmediateProgress(multiBackupProgress.Add), CancellationToken.None);
+            Check(multiManifest.RawPartitions.Count == 2, "La prueba usa dos particiones RAW reales simuladas");
+            AssertProgressFlow(multiBackupProgress, 7);
+            var multiRestoreProgress = new List<WorkProgress>();
+            await multiService.RestoreAsync(multiBackup, target, new ImmediateProgress(multiRestoreProgress.Add), CancellationToken.None);
+            AssertProgressFlow(multiRestoreProgress, 10);
+            AssertRestoreSteps(multiRestoreProgress, new[] { 2, 3 });
+            Check(DiskLayout.Inspect(multiDisks.TargetStream, target).Raw.Count == 2,
+                "El progreso de dos RAW corresponde a dos particiones restauradas válidas");
+            cases += 5;
+
             // Cancel while copying a file. No complete manifest and no target session may result.
             var cancelledBackup = Path.Combine(root, "cancelled");
             using var cts = new CancellationTokenSource();
-            var cancelling = new ImmediateProgress(p => { if (p.Stage == "Creando copia") cts.Cancel(); });
+            var cancelledProgress = new List<WorkProgress>();
+            var cancelling = new ImmediateProgress(p =>
+            {
+                cancelledProgress.Add(p);
+                if (p.Stage == "Creando copia") cts.Cancel();
+            });
             await ExpectThrowsAsync<OperationCanceledException>(() => service.CreateAsync(source, cancelledBackup, cancelling, cts.Token));
             Check(!File.Exists(Path.Combine(cancelledBackup, "manifest.json")), "Cancelación nunca completa el manifiesto");
-            cases += 2;
+            Check(cancelledProgress.All(p => !p.IsOperationComplete), "Una copia cancelada nunca completa el contador global");
+            cases += 3;
 
             // A path traversal injected into JSON is rejected before opening any disk for writes.
             var originalJson = await File.ReadAllTextAsync(Path.Combine(backup, "manifest.json"));
@@ -128,10 +181,14 @@ public static class BackupTests
             var flushRoot = Path.Combine(root, "flush-error-target");
             Directory.CreateDirectory(flushRoot);
             var flushFailure = new FakeDisks(source, target, flushRoot) { FailFinalFlush = true };
-            await ExpectThrowsAsync<IOException>(() => new BackupService(flushFailure).RestoreAsync(backup, target, Quiet, CancellationToken.None));
+            var flushProgress = new List<WorkProgress>();
+            await ExpectThrowsAsync<IOException>(() => new BackupService(flushFailure).RestoreAsync(backup, target,
+                new ImmediateProgress(flushProgress.Add), CancellationToken.None));
             var flushStatus = await File.ReadAllTextAsync(Path.Combine(backup, "ultima-restauracion.json"));
             Check(flushStatus.Contains("error-destino-incompleto") && !flushStatus.Contains("completada-y-verificada"), "Un fallo del volcado final nunca informa de éxito");
-            cases += 2;
+            Check(flushProgress.Any(p => p.Steps[p.StepNumber - 1].Id == "finalize") &&
+                flushProgress.All(p => !p.IsOperationComplete), "El último paso permanece incompleto si falla el vaciado");
+            cases += 3;
         }
         finally
         {
@@ -145,6 +202,39 @@ public static class BackupTests
             Directory.Delete(root, true);
         }
         return cases;
+    }
+
+    internal static void AssertProgressFlow(IReadOnlyList<WorkProgress> reports, int expectedSteps)
+    {
+        Check(reports.Count > 0 && reports.All(p => p.Steps.Count == expectedSteps),
+            "Todos los reportes mantienen el número real de pasos");
+        Check(reports.All(p => p.StepNumber >= 1 && p.StepNumber <= expectedSteps), "Los números de paso tienen límites válidos");
+        Check(reports.Select(p => p.StepNumber).SequenceEqual(reports.Select(p => p.StepNumber).Order()),
+            "Los pasos no retroceden cuando se alterna copiar y verificar");
+        Check(reports.Select(p => p.StepNumber).Distinct().SequenceEqual(Enumerable.Range(1, expectedSteps)),
+            "Ningún paso se omite en los reportes");
+        Check(reports.All(p => !string.IsNullOrWhiteSpace(p.Operation) && !string.IsNullOrWhiteSpace(p.Stage) &&
+            !string.IsNullOrWhiteSpace(p.Detail)), "Cada reporte identifica la operación y actividad actual");
+        Check(reports.Select(p => p.Operation).Distinct().Count() == 1, "La operación no cambia en un mismo flujo");
+        Check(reports.All(p => p.Steps.Select(s => s.Id).SequenceEqual(reports[0].Steps.Select(s => s.Id))),
+            "Las identidades de los pasos permanecen estables");
+        Check(reports[^1].IsOperationComplete && reports.Take(reports.Count - 1).All(p => !p.IsOperationComplete),
+            "Solo el último reporte confirma el éxito de toda la operación");
+    }
+
+    internal static void AssertRestoreSteps(IReadOnlyList<WorkProgress> reports, IReadOnlyList<int> rawPartitionNumbers)
+    {
+        var expected = new List<string> { "verify-backup", "prepare-target" };
+        foreach (int number in rawPartitionNumbers)
+        {
+            expected.Add($"copy-raw-{number}");
+            expected.Add($"verify-raw-{number}");
+        }
+        expected.AddRange(new[] { "mount-target", "copy-files", "verify-files", "finalize" });
+        Check(reports[0].Steps.Select(s => s.Id).SequenceEqual(expected), "El plan refleja el orden real de restauración");
+        Check(reports.Any(p => p.Steps[p.StepNumber - 1].Id == "mount-target" && !p.IsOperationComplete) &&
+            reports.Any(p => p.Steps[p.StepNumber - 1].Id == "finalize" && !p.IsOperationComplete),
+            "Montaje y vaciado son actividades visibles antes del éxito");
     }
 
     private static bool HasFlagValue(this int attrs, FileAttributes flag) => ((FileAttributes)attrs & flag) != 0;
