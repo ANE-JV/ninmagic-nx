@@ -83,7 +83,7 @@ internal static class NativeDisk
     internal static string Fingerprint(int number, long size)
     {
         using SafeFileHandle handle = OpenPhysical(number, false, size);
-        using var stream = new FileStream(handle, FileAccess.Read, 4096, false);
+        using var stream = new PhysicalDiskStream(handle, size, writable: false);
         byte[] sector = new byte[512];
         stream.ReadExactly(sector);
         return Convert.ToHexString(SHA256.HashData(sector));
@@ -154,51 +154,154 @@ internal static class NativeDisk
 
 internal sealed class PhysicalDiskStream : Stream
 {
-    private readonly FileStream inner;
+    private const int SectorSize = 512;
+    private readonly Stream inner;
     private readonly long length;
     private readonly bool writable;
+    private long position;
+    private bool disposed;
     internal PhysicalDiskStream(SafeFileHandle handle, long length, bool writable)
+        : this(OpenStream(handle, length, writable), length, writable) { }
+
+    // The injected stream permits testing readers that enforce the same sector constraints as a device.
+    internal PhysicalDiskStream(Stream device, long length, bool writable)
     {
+        if (length <= 0 || length % SectorSize != 0) throw new ArgumentOutOfRangeException(nameof(length));
+        if (!device.CanRead || !device.CanSeek || writable && !device.CanWrite)
+            throw new ArgumentException("El dispositivo no admite el acceso solicitado.", nameof(device));
         this.length = length;
         this.writable = writable;
-        // Callers already use large transfer buffers. Disable FileStream's extra buffer so a
-        // final-sector read cannot read ahead beyond the physical device's declared length.
-        inner = new FileStream(handle, writable ? FileAccess.ReadWrite : FileAccess.Read, bufferSize: 1, isAsync: false);
+        inner = device;
+    }
+    private static FileStream OpenStream(SafeFileHandle handle, long length, bool writable)
+    {
+        if (length <= 0 || length % SectorSize != 0) throw new ArgumentOutOfRangeException(nameof(length));
+        // No FileStream read-ahead or deferred writes. Every device read below is sector aligned,
+        // including short metadata reads, so Windows never receives an 8-byte physical-disk request.
+        return new FileStream(handle, writable ? FileAccess.ReadWrite : FileAccess.Read, bufferSize: 1, isAsync: false);
     }
     public override bool CanRead => inner.CanRead;
     public override bool CanSeek => inner.CanSeek;
     public override bool CanWrite => writable && inner.CanWrite;
     public override long Length => length;
-    public override long Position { get => inner.Position; set => Seek(value, SeekOrigin.Begin); }
-    public override void Flush() => inner.Flush(flushToDisk: true);
+    public override long Position { get { ObjectDisposedException.ThrowIf(disposed, this); return position; } set => Seek(value, SeekOrigin.Begin); }
+    public override void Flush()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (inner is FileStream file) file.Flush(flushToDisk: true);
+        else inner.Flush();
+    }
     public override Task FlushAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested(); Flush(); return Task.CompletedTask;
     }
-    public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, ClampRead(count));
-    public override int Read(Span<byte> buffer) => inner.Read(buffer[..ClampRead(buffer.Length)]);
-    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
-        inner.ReadAsync(buffer[..ClampRead(buffer.Length)], cancellationToken);
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        ValidateBufferArguments(buffer, offset, count);
+        return Read(buffer.AsSpan(offset, count));
+    }
+    public override int Read(Span<byte> buffer)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        int wanted = ClampRead(buffer.Length), copied = 0;
+        Span<byte> sector = stackalloc byte[SectorSize];
+        while (copied < wanted)
+        {
+            int skip = (int)(position % SectorSize), remaining = wanted - copied;
+            inner.Position = position - skip;
+            if (skip == 0 && remaining >= SectorSize)
+            {
+                int count = inner.Read(buffer.Slice(copied, remaining / SectorSize * SectorSize));
+                CheckAlignedRead(count);
+                position += count; copied += count;
+            }
+            else
+            {
+                int count = inner.Read(sector);
+                if (count != SectorSize) throw new IOException("Windows devolvió un sector incompleto de la tarjeta.");
+                int take = Math.Min(remaining, SectorSize - skip);
+                sector.Slice(skip, take).CopyTo(buffer[copied..]);
+                position += take; copied += take;
+            }
+        }
+        return copied;
+    }
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        int wanted = ClampRead(buffer.Length), copied = 0;
+        byte[]? sector = null;
+        while (copied < wanted)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            int skip = (int)(position % SectorSize), remaining = wanted - copied;
+            inner.Position = position - skip;
+            if (skip == 0 && remaining >= SectorSize)
+            {
+                int count = await inner.ReadAsync(buffer.Slice(copied, remaining / SectorSize * SectorSize), cancellationToken).ConfigureAwait(false);
+                CheckAlignedRead(count);
+                position += count; copied += count;
+            }
+            else
+            {
+                sector ??= new byte[SectorSize];
+                int count = await inner.ReadAsync(sector, cancellationToken).ConfigureAwait(false);
+                if (count != SectorSize) throw new IOException("Windows devolvió un sector incompleto de la tarjeta.");
+                int take = Math.Min(remaining, SectorSize - skip);
+                sector.AsMemory(skip, take).CopyTo(buffer[copied..]);
+                position += take; copied += take;
+            }
+        }
+        return copied;
+    }
+    private static void CheckAlignedRead(int count)
+    {
+        if (count <= 0 || count % SectorSize != 0)
+            throw new IOException("Windows devolvió datos incompletos de la tarjeta.");
+    }
     private int ClampRead(int count) => (int)Math.Min(count, Math.Max(0, length - Position));
     private void CheckWrite(int count)
     {
+        ObjectDisposedException.ThrowIf(disposed, this);
         if (!writable) throw new NotSupportedException("El origen está abierto solo para lectura.");
         if (count < 0 || Position > length - count) throw new IOException("La escritura supera los límites del destino.");
+        // Never expand an unaligned write or read-modify-write neighbouring sectors.
+        if (count != 0 && (Position % SectorSize != 0 || count % SectorSize != 0))
+            throw new IOException("La escritura física debe estar alineada a sectores de 512 bytes.");
     }
-    public override void Write(byte[] buffer, int offset, int count) { CheckWrite(count); inner.Write(buffer, offset, count); }
-    public override void Write(ReadOnlySpan<byte> buffer) { CheckWrite(buffer.Length); inner.Write(buffer); }
-    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
-    { CheckWrite(buffer.Length); return inner.WriteAsync(buffer, cancellationToken); }
+    public override void Write(byte[] buffer, int offset, int count)
+    { ValidateBufferArguments(buffer, offset, count); Write(buffer.AsSpan(offset, count)); }
+    public override void Write(ReadOnlySpan<byte> buffer)
+    {
+        CheckWrite(buffer.Length);
+        if (buffer.Length == 0) return;
+        inner.Position = position; inner.Write(buffer); position += buffer.Length;
+    }
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        CheckWrite(buffer.Length); cancellationToken.ThrowIfCancellationRequested();
+        if (buffer.Length == 0) return;
+        inner.Position = position;
+        await inner.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+        position += buffer.Length;
+    }
     public override long Seek(long offset, SeekOrigin origin)
     {
+        ObjectDisposedException.ThrowIf(disposed, this);
         long position = checked(origin switch
         {
             SeekOrigin.Begin => offset, SeekOrigin.Current => Position + offset, SeekOrigin.End => length + offset,
             _ => throw new ArgumentOutOfRangeException(nameof(origin))
         });
         if (position < 0 || position > length) throw new IOException("Acceso fuera de los límites de la tarjeta.");
-        return inner.Seek(position, SeekOrigin.Begin);
+        this.position = position;
+        return position;
     }
     public override void SetLength(long value) => throw new NotSupportedException();
-    protected override void Dispose(bool disposing) { if (disposing) inner.Dispose(); base.Dispose(disposing); }
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !disposed) { disposed = true; inner.Dispose(); }
+        base.Dispose(disposing);
+    }
 }

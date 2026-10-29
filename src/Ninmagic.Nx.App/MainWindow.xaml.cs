@@ -72,6 +72,7 @@ public partial class MainWindow : Window
             DiskCombo.SelectedItem = available.FirstOrDefault(d => d.Identity == selected);
             if (DiskCombo.SelectedItem == null && available.Count == 1) DiskCombo.SelectedIndex = 0;
             if (available.Count == 0) DiskDetails.Text = "No hay tarjetas compatibles. Conecta un lector USB/SD y pulsa Actualizar.";
+            Log($"Consulta de tarjetas terminada: {available.Count} disponible(s).");
         }
         catch (Exception ex) { ShowStartNotice("No se pudieron consultar las tarjetas. " + ex.Message); Log(ex.ToString()); }
         finally { refreshing = false; Inputs.IsEnabled = VerificationOptions.IsEnabled = ModeButtons.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = ActionButton.IsEnabled = true; }
@@ -225,7 +226,7 @@ public partial class MainWindow : Window
         BeginProgress(name);
         try
         {
-            Log("Inicio de operación ninmagic-nx 1.5.1");
+            Log("Inicio de operación ninmagic-nx 1.5.2");
             await action(operation.Token);
         }
         catch (OperationCanceledException)
@@ -243,7 +244,10 @@ public partial class MainWindow : Window
             ActionNotice.Text = ex.Message;
             ActionNotice.Visibility = Visibility.Visible;
             Log(ex.ToString());
-            MessageBox.Show(this, ex.Message + "\n\nLa operación no se ha marcado como correcta. Conserva la tarjeta original y la copia; si ya se había empezado a escribir el destino, vuelve a restaurarlo desde el principio.\n\nRegistro: " + logFile, "ninmagic-nx · Revisar operación", MessageBoxButton.OK, MessageBoxImage.Error);
+            var recovery = name == "Crear copia"
+                ? "La copia no se ha completado. La tarjeta original se abre solo para lectura. Conserva la original y vuelve a intentarlo cuando se haya resuelto el error."
+                : "La operación no se ha marcado como correcta. Conserva la tarjeta original y la copia; si ya se había empezado a escribir el destino, vuelve a restaurarlo desde el principio.";
+            MessageBox.Show(this, ex.Message + "\n\n" + recovery + "\n\nRegistro: " + logFile, "ninmagic-nx · Revisar operación", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -409,7 +413,7 @@ public partial class MainWindow : Window
         {
             Directory.CreateDirectory(logFolder);
             logFile = Path.Combine(logFolder, $"ninmagic-nx-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
-            File.AppendAllText(logFile, $"{DateTimeOffset.Now:O} Sesión ninmagic-nx 1.5.1{Environment.NewLine}");
+            File.AppendAllText(logFile, $"{DateTimeOffset.Now:O} Sesión ninmagic-nx 1.5.2{Environment.NewLine}");
         }
         catch (IOException) { logFile = ""; }
         catch (UnauthorizedAccessException) { logFile = ""; }

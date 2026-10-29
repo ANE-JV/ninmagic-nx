@@ -1,12 +1,18 @@
-# Validación de ninmagic-nx 1.5.1
+# Validación de ninmagic-nx 1.5.2
 
 Fecha de preparación: 29 de octubre de 2026.
+
+## Corrección 1.5.2
+
+El registro de una copia real identifica una excepción en `PhysicalDiskStream.Read` durante `DiskLayout.Inspect`. La inspección lee ocho bytes en la posición 512 para detectar GPT; el acceso físico sin búfer adicional no admite esa longitud. .NET puede ocultar el error original al intentar consultar la longitud como si fuera un archivo, devolviendo «Función incorrecta».
+
+Se adapta la lectura a sectores de 512 bytes sin omitir comprobaciones, sin consultar la longitud como archivo y sin leer fuera de la capacidad conocida. Se mantiene un camino directo para transferencias alineadas y se rechazan las escrituras desalineadas, sin modificar sectores adyacentes. La prueba completa en hardware de esta versión sigue pendiente; el error se produjo antes de crear la copia y el origen se abrió solo para lectura.
 
 ## Actualización 1.5.1
 
 Se añaden letras de unidad al selector, detalles y confirmación, conservando las rutas GUID y la identidad física. Cinco pruebas nuevas cubren letras múltiples, volúmenes sin letra, manifiestos anteriores y conservación de identidad. La suite contiene 156 comprobaciones. Otras 16 comprobaciones WPF verifican la visibilidad de las letras, el acceso al botón en tamaño normal/mínimo, los avisos, las guardas de inicio y el contador durante la preparación. El empaquetado exige que ambas suites terminen sin fallos.
 
-Los avisos de permisos o tarjeta sin seleccionar quedan visibles junto al botón. El tiempo transcurrido se actualiza durante la preparación inicial y los registros de sesión incluyen la recepción del clic. El usuario informó de un botón que no responde en otro PC; esa incidencia no se ha reproducido y no se considera resuelta sin comprobarlo allí. Las pruebas de interacción de WPF se ejecutan sin mostrar ventanas ni enumerar tarjetas.
+Los avisos de permisos o tarjeta sin seleccionar quedan visibles junto al botón. El tiempo transcurrido se actualiza durante la preparación inicial y los registros de sesión incluyen la recepción del clic. La nueva prueba confirmó que el botón inferior recibe el clic y permitió localizar la excepción de lectura descrita arriba. Las pruebas de interacción de WPF se ejecutan sin mostrar ventanas ni enumerar tarjetas.
 
 ## Estado de la versión 1.5
 

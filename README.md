@@ -2,7 +2,7 @@
 
 Aplicación portable en español para Windows 10/11 de 64 bits. Permite guardar una copia verificada de una microSD con Atmosphère y emuMMC en el PC y restaurarla en una tarjeta de mayor capacidad, ampliando la partición de archivos.
 
-**Estado: versión 1.5.1 con letras de unidad y avisos de inicio visibles.** El usuario ha confirmado el funcionamiento de la migración realizada con la versión 1.2 y de la tarjeta nueva en su consola. Es una confirmación de ese caso concreto; la versión 1.5.1 no se ha probado todavía mediante otra migración física. Las comprobaciones automáticas y sobre dispositivos simulados no son una garantía de ausencia de errores ni de compatibilidad con cualquier tarjeta. Conserva la original hasta verificar la nueva en tu consola.
+**Estado: versión 1.5.2 con corrección de lecturas físicas, letras de unidad y avisos de inicio visibles.** El usuario ha confirmado el funcionamiento de la migración realizada con la versión 1.2 y de la tarjeta nueva en su consola. Es una confirmación de ese caso concreto; la versión 1.5.2 no se ha probado todavía mediante otra migración física completa. Las comprobaciones automáticas y sobre dispositivos simulados no son una garantía de ausencia de errores ni de compatibilidad con cualquier tarjeta. Conserva la original hasta verificar la nueva en tu consola.
 
 ## Descargar y usar
 
@@ -21,7 +21,11 @@ El ejecutable portable `ninmagic-nx.exe` se encuentra en [Releases](https://gith
 
 El selector muestra primero la letra que Windows asigna a la tarjeta, por ejemplo **E: · Disco 3**, además del nombre y la capacidad. Si tiene varias letras, aparecen todas; si no tiene ninguna, se indica **Sin letra asignada**. Las letras sirven para identificarla visualmente: el acceso sigue usando la identidad física y la ruta estable del volumen. Las copias anteriores siguen siendo compatibles.
 
-Al iniciar aparece **Inicio recibido · preparando operación** y el contador transcurrido continúa durante las consultas iniciales a Windows. La falta de permisos o de una tarjeta seleccionada se explica junto al botón, sin depender de una ventana de aviso. **Abrir registros** permite localizar el registro de la sesión, que incluye la recepción del clic y los errores disponibles. Se ha informado de un botón que no responde en otro PC; no se ha reproducido esa incidencia y esta versión facilita su diagnóstico, sin darla por resuelta.
+Al iniciar aparece **Inicio recibido · preparando operación** y el contador transcurrido continúa durante las consultas iniciales a Windows. La falta de permisos o de una tarjeta seleccionada se explica junto al botón, sin depender de una ventana de aviso. **Abrir registros** permite localizar el registro de la sesión, que incluye la recepción del clic y los errores disponibles. El botón superior selecciona la sección; el botón inferior **Crear y verificar copia** inicia la operación.
+
+## Lectura de la tarjeta · versión 1.5.2
+
+Una prueba real permitió localizar el error **Función incorrecta** al empezar la copia: la inspección solicitaba una firma de ocho bytes directamente al dispositivo físico. El adaptador ahora lee sectores completos de 512 bytes y devuelve al analizador los bytes solicitados, también para tablas GPT internas cuya longitud no sea múltiplo de un sector. Conserva los límites del disco y el acceso de solo lectura al origen. La corrección no omite ninguna validación de particiones ni convierte un fallo de lectura en éxito.
 
 ## Pasos y tiempo estimado · versión 1.3
 
