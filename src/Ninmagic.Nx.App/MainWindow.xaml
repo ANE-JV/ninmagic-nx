@@ -1,4 +1,4 @@
-<Window x:Class="Ninmagic.Nx.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="ninmagic-nx 1.6.0 · Migrador de microSD" Width="1140" Height="850" MinWidth="900" MinHeight="740" WindowStartupLocation="CenterScreen" Background="{StaticResource CircuitBackground}" Icon="Assets/ninmagic-logo.jpg" FontFamily="Segoe UI" FontSize="14" Foreground="#F0F4FA">
+<Window x:Class="Ninmagic.Nx.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="ninmagic-nx 1.6.1 · Migrador de microSD" Width="1140" Height="850" MinWidth="900" MinHeight="740" WindowStartupLocation="CenterScreen" Background="{StaticResource CircuitBackground}" Icon="Assets/ninmagic-logo.jpg" FontFamily="Segoe UI" FontSize="14" Foreground="#F0F4FA">
   <Grid Margin="30,24">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <Grid Margin="0,0,0,22"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -75,7 +75,7 @@
       <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <Button Content="Ayuda y compatibilidad" Click="Help_Click" Background="Transparent" Foreground="{StaticResource Muted}" Padding="0" FontSize="12"/>
       <Button x:Name="UpdateButton" Grid.Column="1" Content="Buscar actualizaciones" Click="Update_Click" Background="Transparent" Foreground="{StaticResource Accent}" Padding="14,0" FontSize="12" HorizontalAlignment="Center" AutomationProperties.Name="Buscar actualizaciones de ninmagic-nx"/>
-      <StackPanel Grid.Column="2" Orientation="Horizontal"><TextBlock Text="1.6.0 · NinMagic · JV" FontSize="12" Foreground="#9EADC0" VerticalAlignment="Center"/><Button Content="Abrir registros" Click="Logs_Click" Background="Transparent" Foreground="{StaticResource Muted}" Padding="15,0,0,0" FontSize="12"/></StackPanel>
+      <StackPanel Grid.Column="2" Orientation="Horizontal"><TextBlock Text="1.6.1 · NinMagic · JV" FontSize="12" Foreground="#9EADC0" VerticalAlignment="Center"/><Button Content="Abrir registros" Click="Logs_Click" Background="Transparent" Foreground="{StaticResource Muted}" Padding="15,0,0,0" FontSize="12"/></StackPanel>
     </Grid>
   </Grid>
 </Window>

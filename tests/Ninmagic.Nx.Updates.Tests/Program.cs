@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -25,8 +24,8 @@ UpdateInfo? Select(params object[] releases)
     using var document = JsonDocument.Parse(JsonSerializer.Serialize(releases));
     return WindowsUpdateService.SelectRelease(document.RootElement, new Version(1, 6, 0));
 }
-WindowsUpdateService Service(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler, string version = "1.6.0", Func<string?>? token = null) =>
-    new(version, new FakeHttp(handler), token ?? (() => "test-token-not-a-real-secret"), Path.Combine(root, "Downloads"));
+WindowsUpdateService Service(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler, string version = "1.6.0") =>
+    new(version, new FakeHttp(handler), Path.Combine(root, "Downloads"));
 HttpResponseMessage Json(string content) => new(HttpStatusCode.OK) { Content = new StringContent(content, Encoding.UTF8, "application/json") };
 try
 {
@@ -40,9 +39,23 @@ try
     await Check("Mac and source archives excluded", () => { Assert(Select(Release("macos-v2.0.0"), Release("v2.0.0", asset: "fuentes.zip"), Release("v3.0.0", asset: "ninmagic-nx.app")) is null); return Task.CompletedTask; });
     await Check("missing trusted digest fails closed", () => Throws<InvalidDataException>(() => { Select(Release("v2.0.0", digest: "")); return Task.CompletedTask; }));
     await Check("oversized assets excluded", () => { Assert(Select(Release("v2.0.0", size: WindowsUpdateService.MaximumAssetBytes + 1)) is null); return Task.CompletedTask; });
-    await Check("no new version is distinct from lack of access", async () => { using var service = Service((_, _) => Task.FromResult(Json("[]"))); Assert(await service.CheckAsync(default) is null); });
+    await Check("no new version is distinct from service unavailable", async () => { using var service = Service((_, _) => Task.FromResult(Json("[]"))); Assert(await service.CheckAsync(default) is null); });
+    await Check("public version check has no Authorization or cookies", async () =>
+    {
+        using var service = Service((request, _) =>
+        {
+            Assert(request.RequestUri!.Host == "api.github.com" && request.Headers.Authorization is null && !request.Headers.Contains("Cookie"));
+            return Task.FromResult(Json(JsonSerializer.Serialize(new[] { Release("v2.0.0") })));
+        });
+        Assert((await service.CheckAsync(default))?.Version == "2.0.0");
+    });
     foreach (var status in new[] { HttpStatusCode.Unauthorized, HttpStatusCode.NotFound })
-        await Check("private auth status " + status, async () => { using var service = Service((_, _) => Task.FromResult(new HttpResponseMessage(status))); await Throws<UnauthorizedAccessException>(() => service.CheckAsync(default)); });
+        await Check("unavailable public repository status " + status, async () =>
+        {
+            using var service = Service((_, _) => Task.FromResult(new HttpResponseMessage(status)));
+            try { await service.CheckAsync(default); throw new InvalidOperationException("Unavailable service must not report up to date"); }
+            catch (IOException ex) { Assert(ex.Message.Contains("no están disponibles") && !ex.Message.Contains("token", StringComparison.OrdinalIgnoreCase)); }
+        });
     await Check("rate limit never masquerades as up to date", async () => { using var service = Service((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden))); await Throws<IOException>(() => service.CheckAsync(default)); });
     await Check("bounded release response", async () => { using var service = Service((_, _) => Task.FromResult(Json(new string(' ', 8 * 1024 * 1024 + 1)))); await Throws<InvalidDataException>(() => service.CheckAsync(default)); });
     await Check("pagination finds newer release on next page", async () =>
@@ -75,21 +88,37 @@ try
         Assert(File.Exists(staged.FilePath) && UpdateFiles.Hash(staged.FilePath) == fixtureHash && progress[^1].Completed == fixture.Length);
         UpdateFiles.ValidateSecureDirectory(Path.GetDirectoryName(staged.FilePath)!);
     });
-    await Check("token goes only to GitHub API, never asset CDN", async () =>
+    await Check("public download and CDN redirect never send Authorization or cookies", async () =>
     {
         int requestCount = 0;
         using var service = Service((request, _) =>
         {
             if (++requestCount == 1)
             {
-                Assert(request.RequestUri!.Host == "api.github.com" && request.Headers.Authorization?.Parameter == "test-token-not-a-real-secret");
+                Assert(request.RequestUri!.Host == "api.github.com" && request.Headers.Authorization is null && !request.Headers.Contains("Cookie"));
                 var redirect = new HttpResponseMessage(HttpStatusCode.Redirect);
                 redirect.Headers.Location = new Uri("https://release-assets.githubusercontent.com/example?download=1"); return Task.FromResult(redirect);
             }
-            Assert(request.Headers.Authorization is null);
+            Assert(request.Headers.Authorization is null && !request.Headers.Contains("Cookie"));
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(fixture) });
         });
         await service.DownloadAsync(update, new DirectProgress(_ => { }), default); Assert(requestCount == 2);
+    });
+    await Check("redirect back to repository API remains anonymous", async () =>
+    {
+        int requestCount = 0;
+        using var service = Service((request, _) =>
+        {
+            Assert(request.Headers.Authorization is null && !request.Headers.Contains("Cookie"));
+            if (++requestCount <= 2)
+            {
+                var redirect = new HttpResponseMessage(HttpStatusCode.Redirect);
+                redirect.Headers.Location = new Uri(requestCount == 1 ? "https://release-assets.githubusercontent.com/example" : WindowsUpdateService.RepositoryApi + "releases/assets/12");
+                return Task.FromResult(redirect);
+            }
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(fixture) });
+        });
+        await service.DownloadAsync(update, new DirectProgress(_ => { }), default); Assert(requestCount == 3);
     });
     foreach (string location in new[] { "http://release-assets.githubusercontent.com/file", "https://evil.example/file", "https://api.github.com:444/repos/ANE-JV/ninmagic-nx/releases/assets/1", "https://api.github.com/repos/other/repo/releases/assets/1", "https://someone@api.github.com/repos/ANE-JV/ninmagic-nx/releases/assets/1" })
         await Check("reject redirect " + new Uri(location).Host + new Uri(location).Port, async () =>

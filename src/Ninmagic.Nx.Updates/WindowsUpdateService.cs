@@ -11,28 +11,24 @@ public sealed class WindowsUpdateService : IDisposable
     internal const string RepositoryApi = "https://api.github.com/repos/ANE-JV/ninmagic-nx/";
     private readonly Version currentVersion;
     private readonly HttpClient client;
-    private readonly Func<string?> getToken;
     private readonly string downloadRoot;
     public WindowsUpdateService(string currentVersion) : this(currentVersion,
-        new HttpClientHandler { AllowAutoRedirect = false }, WindowsCredentialStore.Read,
+        new HttpClientHandler { AllowAutoRedirect = false, UseDefaultCredentials = false, Credentials = null, UseCookies = false },
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NinmagicNX", "Updates")) { }
-    internal WindowsUpdateService(string version, HttpMessageHandler handler, Func<string?> token, string downloadRoot)
+    internal WindowsUpdateService(string version, HttpMessageHandler handler, string downloadRoot)
     {
         if (!UpdateVersions.TryParseStable(version, out currentVersion)) throw new ArgumentException("Versión actual no válida.");
         client = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(15) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("ninmagic-nx/" + version);
-        getToken = token; this.downloadRoot = downloadRoot;
+        this.downloadRoot = downloadRoot;
     }
-    public bool HasSavedToken => !string.IsNullOrWhiteSpace(getToken());
-    public void SaveToken(string token) => WindowsCredentialStore.Save(token);
-    public void DeleteToken() => WindowsCredentialStore.Delete();
 
     public async Task<UpdateInfo?> CheckAsync(CancellationToken cancellationToken)
     {
         UpdateInfo? selected = null;
         for (int page = 1; page <= 5; page++)
         {
-            using var response = await SendAsync(new Uri(RepositoryApi + $"releases?per_page=100&page={page}"), "application/vnd.github+json", true, cancellationToken);
+            using var response = await SendAsync(new Uri(RepositoryApi + $"releases?per_page=100&page={page}"), "application/vnd.github+json", cancellationToken);
             var bytes = await ReadBoundedAsync(response.Content, 8 * 1024 * 1024, cancellationToken);
             using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 40 });
             if (document.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidDataException("GitHub devolvió una lista de versiones no válida.");
@@ -78,7 +74,7 @@ public sealed class WindowsUpdateService : IDisposable
         var path = Path.Combine(stage, "ninmagic-nx.exe");
         try
         {
-            using var response = await SendAsync(new Uri(RepositoryApi + "releases/assets/" + update.AssetId), "application/octet-stream", true, cancellationToken);
+            using var response = await SendAsync(new Uri(RepositoryApi + "releases/assets/" + update.AssetId), "application/octet-stream", cancellationToken);
             if (response.Content.Headers.ContentLength is { } announced && announced != update.Size)
                 throw new InvalidDataException("El tamaño anunciado de la descarga no coincide con la versión publicada.");
             await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -114,9 +110,8 @@ public sealed class WindowsUpdateService : IDisposable
     }
     public void StartInstall(StagedUpdate staged) => UpdateInstaller.Start(staged, currentVersion.ToString());
 
-    private async Task<HttpResponseMessage> SendAsync(Uri uri, string accept, bool api, CancellationToken ct)
+    private async Task<HttpResponseMessage> SendAsync(Uri uri, string accept, CancellationToken ct)
     {
-        string? token = api ? getToken() : null;
         for (var hop = 0; hop < 5; hop++)
         {
             if (uri.Scheme != Uri.UriSchemeHttps || !uri.IsDefaultPort || !string.IsNullOrEmpty(uri.UserInfo)) throw new IOException("La descarga no usa una conexión segura admitida.");
@@ -128,7 +123,6 @@ public sealed class WindowsUpdateService : IDisposable
             if (isApi)
             {
                 request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
-                if (!string.IsNullOrWhiteSpace(token)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             }
             var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
             if (response.StatusCode is HttpStatusCode.MovedPermanently or HttpStatusCode.Redirect or HttpStatusCode.SeeOther or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect)
@@ -136,16 +130,14 @@ public sealed class WindowsUpdateService : IDisposable
                 var location = response.Headers.Location; response.Dispose();
                 if (location is null) throw new IOException("GitHub devolvió una redirección incompleta.");
                 uri = location.IsAbsoluteUri ? location : new Uri(uri, location);
-                // Never restore credentials after following a CDN redirect.
-                if (!uri.Host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase)) token = null;
                 continue;
             }
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NotFound)
-            { response.Dispose(); throw new UnauthorizedAccessException("El repositorio es privado. Configura un token de GitHub con permiso Contents: Read para ANE-JV/ninmagic-nx."); }
+            { response.Dispose(); throw new IOException("Las actualizaciones públicas no están disponibles en este momento. Inténtalo más tarde; la aplicación actual se conserva."); }
             if (!response.IsSuccessStatusCode)
             {
                 var status = (int)response.StatusCode; response.Dispose();
-                throw new IOException(status == 403 ? "GitHub no permite la consulta: revisa los permisos del token o inténtalo más tarde si se alcanzó el límite de solicitudes." : $"No se pudo consultar GitHub (HTTP {status}). La aplicación actual se conserva.");
+                throw new IOException(status == 403 ? "GitHub ha limitado temporalmente las consultas o el servicio no está disponible. Inténtalo más tarde; la aplicación actual se conserva." : $"No se pudo consultar GitHub (HTTP {status}). La aplicación actual se conserva.");
             }
             return response;
         }

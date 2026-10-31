@@ -1,8 +1,16 @@
-# Validación de ninmagic-nx 1.6.0
+# Validación de ninmagic-nx 1.6.1
 
 Fecha de preparación: 1 de noviembre de 2026.
 
-## Actualizaciones dentro de Windows
+## Actualizaciones públicas sin token · 1.6.1
+
+El repositorio pasa a ser público a petición del propietario. La aplicación consulta y descarga versiones sin autenticación, elimina el formulario de credenciales y deja de leer o guardar tokens. Las credenciales que hubiera guardado una versión anterior no se utilizan ni se modifican. Se conservan las verificaciones de tamaño, SHA-256, arquitectura, producto y versión, y el instalador con copia de recuperación.
+
+La 1.6.0 puede obtener esta versión con **Buscar de nuevo**, sin introducir credenciales, una vez que el repositorio es público. Los mensajes de error de la 1.6.1 explican fallos de conexión, disponibilidad o límite de consultas sin pedir un token. La validación utiliza HTTP simulado para comprobar consultas y descargas sin cabecera Authorization, además de integración con ejecutables desechables y comprobaciones WPF. El motor de migración solo cambia la versión del manifiesto.
+
+Resultado local de 1.6.1: 262 comprobaciones superadas (156 del motor de migración, 48 del actualizador, 19 de instalación y reinicio con procesos reales desechables y 39 de interfaz WPF). La revisión confirma la eliminación del almacén de credenciales y del formulario, y la conservación de las validaciones del instalador. La compilación portable Windows x64 terminó correctamente.
+
+## Actualizaciones dentro de Windows · 1.6.0 (histórico)
 
 La versión 1.6.0 añade consulta de versiones, descarga verificada e instalación del ejecutable desde la aplicación. El repositorio permanece privado y el acceso se guarda en el Administrador de credenciales de Windows. La actualización no envía datos de las microSD ni de las copias. El motor de migración conserva el comportamiento de 1.5.2; en él solo cambia la versión escrita en el manifiesto.
 
