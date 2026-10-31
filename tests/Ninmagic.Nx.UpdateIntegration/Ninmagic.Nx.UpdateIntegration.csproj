@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Ninmagic.Nx.UpdateIntegration</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Ninmagic.Nx.Updates/Ninmagic.Nx.Updates.csproj" />
+  </ItemGroup>
+</Project>
