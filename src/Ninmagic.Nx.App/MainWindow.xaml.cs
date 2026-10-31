@@ -44,13 +44,19 @@ public partial class MainWindow : Window
         {
             InitializeSessionLog();
             Log($"Ventana abierta · Administrador: {IsAdmin} · Demostración: {preview}");
+            var launchArguments = Environment.GetCommandLineArgs();
+            if (launchArguments.Length == 6 && launchArguments[4] == "--updated" && launchArguments[5] == CurrentVersion)
+            {
+                StatusText.Text = "Aplicación actualizada a " + CurrentVersion;
+                ProgressDetail.Text = "Actualización instalada. Ya puedes usar ninmagic-nx.";
+            }
             if (preview)
             {
                 Title += " · Vista de demostración";
                 AdminBanner.Visibility = Visibility.Collapsed;
                 DiskCombo.ItemsSource = new[] { new DiskInfo(2, "Lector de microSD · Ejemplo", "DEMO", "DEMO", 64_000_000_000, 512, "USB", false, false, false, "MBR", new[] { new VolumeInfo(1, 16_777_216, 32_000_000_000, "E:\\", "FAT32", "SWITCH") }) };
                 DiskCombo.SelectedIndex = 0;
-                ActionButton.IsEnabled = false;
+                ActionButton.IsEnabled = UpdateButton.IsEnabled = false;
                 Summary.Text = "Vista de demostración: las operaciones sobre tarjetas están desactivadas.";
             }
             else await RefreshDisksAsync();
@@ -60,10 +66,10 @@ public partial class MainWindow : Window
 
     private async Task RefreshDisksAsync()
     {
-        if (operation != null || preview || refreshing) return;
+        if (operation != null || preview || refreshing || updateOpen) return;
         refreshing = true;
         Log("Consultando tarjetas disponibles.");
-        Inputs.IsEnabled = VerificationOptions.IsEnabled = ModeButtons.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = ActionButton.IsEnabled = false;
+        Inputs.IsEnabled = VerificationOptions.IsEnabled = ModeButtons.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = ActionButton.IsEnabled = UpdateButton.IsEnabled = false;
         try
         {
             var selected = (DiskCombo.SelectedItem as DiskInfo)?.Identity;
@@ -71,16 +77,16 @@ public partial class MainWindow : Window
             DiskCombo.ItemsSource = available;
             DiskCombo.SelectedItem = available.FirstOrDefault(d => d.Identity == selected);
             if (DiskCombo.SelectedItem == null && available.Count == 1) DiskCombo.SelectedIndex = 0;
-            if (available.Count == 0) DiskDetails.Text = "No hay tarjetas compatibles. Conecta un lector USB/SD y pulsa Actualizar.";
+            if (available.Count == 0) DiskDetails.Text = "No hay tarjetas compatibles. Conecta un lector USB/SD y pulsa Buscar tarjetas.";
             Log($"Consulta de tarjetas terminada: {available.Count} disponible(s).");
         }
         catch (Exception ex) { ShowStartNotice("No se pudieron consultar las tarjetas. " + ex.Message); Log(ex.ToString()); }
-        finally { refreshing = false; Inputs.IsEnabled = VerificationOptions.IsEnabled = ModeButtons.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = ActionButton.IsEnabled = true; }
+        finally { refreshing = false; Inputs.IsEnabled = VerificationOptions.IsEnabled = ModeButtons.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = ActionButton.IsEnabled = UpdateButton.IsEnabled = true; }
     }
 
     private void SetMode(bool restore)
     {
-        if (operation != null || refreshing) return;
+        if (operation != null || refreshing || updateOpen) return;
         restoring = restore;
         ActionNotice.Visibility = Visibility.Collapsed;
         BackupTab.Style = (Style)FindResource(restore ? typeof(Button) : "Primary");
@@ -221,12 +227,12 @@ public partial class MainWindow : Window
         operation = new CancellationTokenSource();
         ActionNotice.Visibility = Visibility.Collapsed;
         ActionButton.Content = "Operación en curso…";
-        Inputs.IsEnabled = VerificationOptions.IsEnabled = ModeButtons.IsEnabled = ActionButton.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = false;
+        Inputs.IsEnabled = VerificationOptions.IsEnabled = ModeButtons.IsEnabled = ActionButton.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = UpdateButton.IsEnabled = false;
         CancelButton.IsEnabled = true;
         BeginProgress(name);
         try
         {
-            Log("Inicio de operación ninmagic-nx 1.5.2");
+            Log("Inicio de operación ninmagic-nx 1.6.0");
             await action(operation.Token);
         }
         catch (OperationCanceledException)
@@ -256,7 +262,7 @@ public partial class MainWindow : Window
             progressGeneration++;
             Progress.IsIndeterminate = false;
             operation.Dispose(); operation = null;
-            Inputs.IsEnabled = VerificationOptions.IsEnabled = ModeButtons.IsEnabled = ActionButton.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = true;
+            Inputs.IsEnabled = VerificationOptions.IsEnabled = ModeButtons.IsEnabled = ActionButton.IsEnabled = VerifyButton.IsEnabled = AdminButton.IsEnabled = UpdateButton.IsEnabled = true;
             CancelButton.IsEnabled = false;
             ActionButton.Content = restoring ? "Comprobar copia y preparar traslado" : "Crear y verificar copia";
         }
@@ -364,16 +370,23 @@ public partial class MainWindow : Window
     }
     private void OnClosing(object? sender, CancelEventArgs e)
     {
+        if (updateOpen && !updateRestart) { e.Cancel = true; return; }
         if (operation == null) return;
         e.Cancel = true;
         MessageBox.Show(this, "Hay una operación en curso. Pulsa Cancelar y espera a que termine antes de cerrar.", "Operación en curso");
     }
     private void Elevate_Click(object sender, RoutedEventArgs e)
     {
+        if (!CanStartOperation()) return;
         try
         {
             var executable = Environment.ProcessPath ?? throw new IOException("No se encuentra el ejecutable.");
-            Process.Start(new ProcessStartInfo(executable) { UseShellExecute = true, Verb = "runas", WorkingDirectory = AppContext.BaseDirectory });
+            using var current = Process.GetCurrentProcess();
+            var start = new ProcessStartInfo(executable) { UseShellExecute = true, Verb = "runas", WorkingDirectory = AppContext.BaseDirectory };
+            start.ArgumentList.Add("--wait-for-parent");
+            start.ArgumentList.Add(current.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            start.ArgumentList.Add(current.StartTime.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Process.Start(start);
             Close();
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223) { ShowStartNotice("Permisos de administrador no concedidos. Pulsa «Abrir como administrador» para volver a intentarlo."); }
@@ -393,6 +406,7 @@ public partial class MainWindow : Window
     }
     private bool CanStartOperation()
     {
+        if (updateOpen) { ShowStartNotice("Termina o cierra la actualización antes de iniciar una operación."); return false; }
         if (operation != null) { Log("Inicio ignorado: ya hay una operación en curso."); return false; }
         if (preview) { ShowStartNotice("Estás en una vista de demostración. Cierra esta ventana y abre ninmagic-nx.exe normalmente."); return false; }
         if (refreshing) { ShowStartNotice("Windows está consultando las tarjetas. Espera a que termine la búsqueda."); return false; }
@@ -413,7 +427,7 @@ public partial class MainWindow : Window
         {
             Directory.CreateDirectory(logFolder);
             logFile = Path.Combine(logFolder, $"ninmagic-nx-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
-            File.AppendAllText(logFile, $"{DateTimeOffset.Now:O} Sesión ninmagic-nx 1.5.2{Environment.NewLine}");
+            File.AppendAllText(logFile, $"{DateTimeOffset.Now:O} Sesión ninmagic-nx 1.6.0{Environment.NewLine}");
         }
         catch (IOException) { logFile = ""; }
         catch (UnauthorizedAccessException) { logFile = ""; }

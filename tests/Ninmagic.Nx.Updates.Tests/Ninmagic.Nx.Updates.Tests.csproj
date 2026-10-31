@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework>
+    <Product>ninmagic-nx</Product><FileVersion>9.0.0.0</FileVersion>
+  </PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../src/Ninmagic.Nx.Updates/Ninmagic.Nx.Updates.csproj" /></ItemGroup>
+</Project>

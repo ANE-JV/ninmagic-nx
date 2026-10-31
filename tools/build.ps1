@@ -7,6 +7,10 @@ try {
     $publishFolder = Join-Path $resolvedOutputRoot 'win-x64'
     & $Dotnet run --project tests/Ninmagic.Nx.Tests -c Release
     if ($LASTEXITCODE -ne 0) { throw 'Las pruebas no han pasado. No se publica un ejecutable.' }
+    & $Dotnet run --project tests/Ninmagic.Nx.Updates.Tests -c Release
+    if ($LASTEXITCODE -ne 0) { throw 'Las pruebas del actualizador no han pasado.' }
+    & $Dotnet run --project tests/Ninmagic.Nx.UpdateIntegration -c Release -- $Dotnet
+    if ($LASTEXITCODE -ne 0) { throw 'La prueba de instalación y reinicio no ha pasado.' }
     & $Dotnet run --project tools/RenderUi -c Release -- (Join-Path $resolvedOutputRoot 'ui-checks')
     if ($LASTEXITCODE -ne 0) { throw 'Las comprobaciones de interfaz no han pasado. No se publica un ejecutable.' }
     & $Dotnet publish src/Ninmagic.Nx.App/Ninmagic.Nx.App.csproj -c Release -r win-x64 --self-contained true -p:DebugType=embedded -o $publishFolder --nologo

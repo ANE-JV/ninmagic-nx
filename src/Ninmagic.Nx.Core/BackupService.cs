@@ -122,7 +122,7 @@ public sealed class BackupService
         if (after.Count != inventory.Count || !after.SequenceEqual(inventory))
             throw new IOException("La tarjeta cambió durante la copia. No se completó la copia; cierra los programas que la utilizan y repite en una carpeta nueva.");
 
-        var manifest = new BackupManifest(1, "1.5.2", DateTime.UtcNow, source, layout.Data,
+        var manifest = new BackupManifest(1, "1.6.0", DateTime.UtcNow, source, layout.Data,
             layout.FileSystem, volume.Label, rawParts, files, excluded);
         ValidateManifest(manifest);
         operationProgress.Report(filesStep + 2, "Verificando copia", "Comprobando los datos guardados en el PC", 0, totalBytes);

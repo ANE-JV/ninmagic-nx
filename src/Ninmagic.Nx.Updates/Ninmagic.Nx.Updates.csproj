@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0-windows</TargetFramework></PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ninmagic.Nx.Updates.Tests" />
+    <InternalsVisibleTo Include="Ninmagic.Nx.UpdateIntegration" />
+  </ItemGroup>
+</Project>

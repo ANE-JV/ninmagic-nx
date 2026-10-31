@@ -7,6 +7,8 @@ using System.Reflection;
 using System.Diagnostics;
 using System.Windows.Threading;
 using Ninmagic.Nx.Core;
+using Ninmagic.Nx.App;
+using Ninmagic.Nx.Updates;
 
 public static class RenderUi
 {
@@ -20,8 +22,18 @@ public static class RenderUi
         var window = new Ninmagic.Nx.App.MainWindow();
         ((TextBox)window.FindName("FolderText")).Text = @"D:\Copias microSD";
         var root = (FrameworkElement)window.Content;
+        Brush renderBackground = window.Background;
         Directory.CreateDirectory(args[0]);
         var checks = 0;
+        var validateRestart = typeof(Ninmagic.Nx.App.App).GetMethod("ValidateRestartArguments", BindingFlags.Static | BindingFlags.NonPublic)!;
+        validateRestart.Invoke(null, new object[] { new[] { "--wait-for-parent", "1", "1" } });
+        Check("elevation restart arguments are accepted", true);
+        validateRestart.Invoke(null, new object[] { new[] { "--wait-for-parent", "1", "1", "--updated", "1.6.0" } });
+        Check("updater restart arguments are accepted", true);
+        var invalidRestartRejected = false;
+        try { validateRestart.Invoke(null, new object[] { new[] { "--wait-for-parent", "1", "1", "--unexpected", "1.6.0" } }); }
+        catch (TargetInvocationException e) when (e.InnerException is IOException) { invalidRestartRejected = true; }
+        Check("unexpected restart arguments are rejected", invalidRestartRejected);
         var windowType = typeof(Ninmagic.Nx.App.MainWindow);
         var combo = (ComboBox)window.FindName("DiskCombo");
         var action = (Button)window.FindName("ActionButton");
@@ -35,6 +47,13 @@ public static class RenderUi
         AssertActionHit("backup normal");
         Render("backup-small", 884, 700);
         AssertActionHit("backup minimum");
+        var updateButton = (Button)window.FindName("UpdateButton");
+        var updateBounds = new Rect(updateButton.TranslatePoint(new Point(), root), updateButton.RenderSize);
+        Check("update button is visible at minimum size", updateButton.Visibility == Visibility.Visible && updateButton.IsEnabled && updateBounds.Top >= 0 && updateBounds.Bottom <= root.ActualHeight && updateBounds.Right <= root.ActualWidth);
+        var updatePoint = updateButton.TranslatePoint(new Point(updateButton.ActualWidth / 2, updateButton.ActualHeight / 2), root);
+        var updateHit = VisualTreeHelper.HitTest(root, updatePoint)?.VisualHit;
+        while (updateHit != null && updateHit != updateButton) updateHit = VisualTreeHelper.GetParent(updateHit);
+        Check("update button receives pointer hit", updateHit == updateButton);
         var showNotice = windowType.GetMethod("ShowStartNotice", BindingFlags.Instance | BindingFlags.NonPublic)!;
         showNotice.Invoke(window, new object[] { "Faltan permisos. Pulsa «Abrir como administrador» en la parte superior y acepta la solicitud de Windows." });
         ((Border)window.FindName("AdminBanner")).Visibility = Visibility.Visible;
@@ -45,20 +64,37 @@ public static class RenderUi
         Check("startup notice fits the minimum window", noticeBounds.Bottom <= root.ActualHeight && noticeBounds.Right <= root.ActualWidth);
         var canStart = windowType.GetMethod("CanStartOperation", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var refreshing = windowType.GetField("refreshing", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var canUpdate = windowType.GetMethod("CanOpenUpdates", BindingFlags.Instance | BindingFlags.NonPublic)!;
         refreshing.SetValue(window, true);
         try
         {
             Check("pending inventory blocks a second operation", !(bool)canStart.Invoke(window, null)!);
             Check("pending inventory explains the wait inline", notice.Visibility == Visibility.Visible && notice.Text.Contains("consultando las tarjetas"));
+            Check("pending inventory blocks application update", !(bool)canUpdate.Invoke(window, null)!);
         }
         finally { refreshing.SetValue(window, false); }
         var operationField = windowType.GetField("operation", BindingFlags.Instance | BindingFlags.NonPublic)!;
         using (var active = new CancellationTokenSource())
         {
             operationField.SetValue(window, active);
-            try { Check("active operation prevents reentry", !(bool)canStart.Invoke(window, null)!); }
+            try
+            {
+                Check("active operation prevents reentry", !(bool)canStart.Invoke(window, null)!);
+                Check("active backup or restore blocks update", !(bool)canUpdate.Invoke(window, null)!);
+            }
             finally { operationField.SetValue(window, null); }
         }
+        var updateOpen = windowType.GetField("updateOpen", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        updateOpen.SetValue(window, true);
+        try
+        {
+            Check("open update dialog blocks new backup or verify", !(bool)canStart.Invoke(window, null)!);
+            Check("open update dialog blocks another updater", !(bool)canUpdate.Invoke(window, null)!);
+            var closing = new System.ComponentModel.CancelEventArgs();
+            windowType.GetMethod("OnClosing", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)!.Invoke(window, new object?[] { window, closing });
+            Check("updater blocks closing the parent before handoff", closing.Cancel);
+        }
+        finally { updateOpen.SetValue(window, false); }
         var renderEstimate = windowType.GetMethod("RenderEstimate", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var beginProgress = windowType.GetMethod("BeginProgress", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var operationClock = (Stopwatch)windowType.GetField("operationClock", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
@@ -122,12 +158,46 @@ public static class RenderUi
         var plan = new MigrationPlan(new PartitionInfo(1, 0x0C, 32768, 440_000_000), new[] { new PartitionInfo(2, 0xE0, 440_100_000, 59_000_000) }, new Dictionary<uint, uint>(), 80_000_000_000, "FAT32", target.Size);
         var dialog = (Window)method.Invoke(window, new object[] { target, plan, new RestoreOptions() })!;
         root = (FrameworkElement)dialog.Content;
+        renderBackground = dialog.Background;
         Render("confirmation", 604, 510);
         dialog.Close();
         dialog = (Window)method.Invoke(window, new object[] { target, plan, new RestoreOptions(false) })!;
         root = (FrameworkElement)dialog.Content;
         Render("confirmation-no-verification", 604, 510);
         dialog.Close();
+        var fakeUpdates = new FakeUpdateService();
+        var updateDialog = new UpdateDialog(fakeUpdates, autoCheck: false);
+        root = (FrameworkElement)updateDialog.Content;
+        renderBackground = updateDialog.Background;
+        Render("updates", 634, 610);
+        Check("constructing update dialog makes no network request", fakeUpdates.CheckCount == 0);
+        var updateType = typeof(UpdateDialog);
+        T UpdateField<T>(string name) => (T)updateType.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(updateDialog)!;
+        Task UpdateCall(string name) => (Task)updateType.GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(updateDialog, null)!;
+        Check("GitHub access uses a masked password field", UpdateField<PasswordBox>("token").PasswordChar == '●');
+        UpdateCall("CheckAsync").GetAwaiter().GetResult();
+        Check("up-to-date result is visible", UpdateField<TextBlock>("status").Text.Contains("más reciente"));
+        Check("up-to-date result cannot install", !UpdateField<Button>("install").IsEnabled);
+        fakeUpdates.Update = new UpdateInfo("9.0.0", "Mejoras de ejemplo para comprobar el diseño.\nLas copias de seguridad se conservan.", 1, 1024, new string('0', 64));
+        UpdateCall("CheckAsync").GetAwaiter().GetResult();
+        Check("new version offers in-app installation", UpdateField<Button>("install").IsEnabled && UpdateField<TextBlock>("status").Text.Contains("9.0.0"));
+        Render("updates-available", 634, 610);
+        UpdateCall("InstallAsync").GetAwaiter().GetResult();
+        Check("failed download never starts replacement", fakeUpdates.InstallCount == 0 && UpdateField<TextBlock>("status").Text.Contains("No se pudo instalar"));
+        fakeUpdates.CheckError = new UnauthorizedAccessException("La cuenta necesita acceso al proyecto privado.");
+        UpdateCall("CheckAsync").GetAwaiter().GetResult();
+        Check("private repository prompts for credentials inside app", UpdateField<Expander>("access").IsExpanded && UpdateField<TextBlock>("status").Text.Contains("acceso"));
+        Check("authorization failure cannot install stale release", !UpdateField<Button>("install").IsEnabled);
+        Render("updates-access", 634, 610);
+        Render("updates-access-small", 544, 490);
+        fakeUpdates.CheckError = null;
+        fakeUpdates.Update = null;
+        UpdateField<PasswordBox>("token").Password = "test-token-only";
+        UpdateCall("SaveAccessAsync").GetAwaiter().GetResult();
+        Check("saving access clears the password box", fakeUpdates.HasSavedToken && UpdateField<PasswordBox>("token").Password.Length == 0);
+        updateType.GetMethod("DeleteAccess", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(updateDialog, null);
+        Check("saved access can be removed", !fakeUpdates.HasSavedToken);
+        updateDialog.Close();
         window.Close();
         Console.WriteLine($"UI CHECKS: {checks} passed; no windows shown or device operations started.");
         void Check(string name, bool condition)
@@ -151,7 +221,7 @@ public static class RenderUi
             var visual = new DrawingVisual();
             using (var context = visual.RenderOpen())
             {
-                context.DrawRectangle(window.Background, null, new Rect(0, 0, width, height));
+                context.DrawRectangle(renderBackground, null, new Rect(0, 0, width, height));
             }
             image.Render(visual);
             image.Render(root);
@@ -159,5 +229,24 @@ public static class RenderUi
             using var output = File.Create(Path.Combine(args[0], name + ".png")); png.Save(output);
             Console.WriteLine(name + ": rendered");
         }
+    }
+
+    private sealed class FakeUpdateService : IUpdateUiService
+    {
+        public bool HasSavedToken { get; private set; }
+        public int CheckCount { get; private set; }
+        public int InstallCount { get; private set; }
+        public UpdateInfo? Update { get; set; }
+        public Exception? CheckError { get; set; }
+        public void SaveToken(string token) => HasSavedToken = token.Length > 0;
+        public void DeleteToken() => HasSavedToken = false;
+        public Task<UpdateInfo?> CheckAsync(CancellationToken cancellationToken)
+        {
+            CheckCount++;
+            return CheckError is null ? Task.FromResult(Update) : Task.FromException<UpdateInfo?>(CheckError);
+        }
+        public Task<StagedUpdate> DownloadAsync(UpdateInfo update, IProgress<UpdateProgress> progress, CancellationToken cancellationToken)
+            => Task.FromException<StagedUpdate>(new IOException("La descarga simulada no pasó la comprobación de integridad."));
+        public void StartInstall(StagedUpdate update) => InstallCount++;
     }
 }

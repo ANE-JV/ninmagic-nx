@@ -1,12 +1,22 @@
-# Validación de ninmagic-nx 1.5.2
+# Validación de ninmagic-nx 1.6.0
 
-Fecha de preparación: 29 de octubre de 2026.
+Fecha de preparación: 1 de noviembre de 2026.
+
+## Actualizaciones dentro de Windows
+
+La versión 1.6.0 añade consulta de versiones, descarga verificada e instalación del ejecutable desde la aplicación. El repositorio permanece privado y el acceso se guarda en el Administrador de credenciales de Windows. La actualización no envía datos de las microSD ni de las copias. El motor de migración conserva el comportamiento de 1.5.2; en él solo cambia la versión escrita en el manifiesto.
+
+Las pruebas del actualizador usan respuestas HTTP controladas y archivos temporales para cubrir selección de versión y plataforma, acceso privado, descargas incompletas, cancelación y rechazo de un SHA-256 incorrecto. La prueba de integración utiliza ejecutables de prueba y procesos reales para comprobar el reemplazo y el reinicio. No se incluyen credenciales en el repositorio y no se utilizan tarjetas físicas para estas comprobaciones. Las pruebas WPF comprueban el botón, el diálogo y el bloqueo mutuo entre actualizaciones y operaciones sobre tarjetas.
+
+La publicación requiere que las suites del motor, del actualizador, de instalación y de interfaz terminen correctamente. Las versiones anteriores no tienen el botón: la 1.6.0 debe descargarse y abrirse una vez para habilitar las próximas actualizaciones desde la aplicación.
+
+Resultado de la compilación final: 156 comprobaciones del motor de migración, 46 del actualizador, 19 de integración con procesos reales y 36 de interfaz; todas superadas. La integración comprueba la espera del proceso original, sustitución y reinicio, conservación de copias y preferencias, rechazo de archivos alterados o en uso y recuperación del ejecutable anterior si falla el lanzamiento. Las pruebas de recuperación también cubren un reemplazo parcial de Windows. Las respuestas de GitHub se simulan; estas pruebas no utilizan un token real ni certifican una actualización futura en todos los equipos.
 
 ## Corrección 1.5.2
 
 El registro de una copia real identifica una excepción en `PhysicalDiskStream.Read` durante `DiskLayout.Inspect`. La inspección lee ocho bytes en la posición 512 para detectar GPT; el acceso físico sin búfer adicional no admite esa longitud. .NET puede ocultar el error original al intentar consultar la longitud como si fuera un archivo, devolviendo «Función incorrecta».
 
-Se adapta la lectura a sectores de 512 bytes sin omitir comprobaciones, sin consultar la longitud como archivo y sin leer fuera de la capacidad conocida. Se mantiene un camino directo para transferencias alineadas y se rechazan las escrituras desalineadas, sin modificar sectores adyacentes. La prueba completa en hardware de esta versión sigue pendiente; el error se produjo antes de crear la copia y el origen se abrió solo para lectura.
+Se adapta la lectura a sectores de 512 bytes sin omitir comprobaciones, sin consultar la longitud como archivo y sin leer fuera de la capacidad conocida. Se mantiene un camino directo para transferencias alineadas y se rechazan las escrituras desalineadas, sin modificar sectores adyacentes. Tras recibir esta corrección, el usuario confirmó que la aplicación para Windows funcionaba correctamente en su prueba. El error anterior se produjo antes de crear la copia y el origen se abrió solo para lectura.
 
 ## Actualización 1.5.1
 
