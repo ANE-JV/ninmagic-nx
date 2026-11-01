@@ -7,7 +7,7 @@ public partial class MainWindow
 {
     private bool updateOpen;
     private bool updateRestart;
-    internal const string CurrentVersion = "1.6.0";
+    internal const string CurrentVersion = "1.6.1";
 
     private bool CanOpenUpdates()
     {

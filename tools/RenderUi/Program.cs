@@ -174,7 +174,10 @@ public static class RenderUi
         var updateType = typeof(UpdateDialog);
         T UpdateField<T>(string name) => (T)updateType.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(updateDialog)!;
         Task UpdateCall(string name) => (Task)updateType.GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(updateDialog, null)!;
-        Check("GitHub access uses a masked password field", UpdateField<PasswordBox>("token").PasswordChar == '●');
+        Check("public updater has no authentication input", !VisualChildren(root).Any(child => child is PasswordBox or TextBox));
+        Check("public updater has no credential instructions", !VisualChildren(root).OfType<TextBlock>().Any(text =>
+            text.Text.Contains("token", StringComparison.OrdinalIgnoreCase) || text.Text.Contains("credencial", StringComparison.OrdinalIgnoreCase) ||
+            text.Text.Contains("privado", StringComparison.OrdinalIgnoreCase)));
         UpdateCall("CheckAsync").GetAwaiter().GetResult();
         Check("up-to-date result is visible", UpdateField<TextBlock>("status").Text.Contains("más reciente"));
         Check("up-to-date result cannot install", !UpdateField<Button>("install").IsEnabled);
@@ -184,19 +187,28 @@ public static class RenderUi
         Render("updates-available", 634, 610);
         UpdateCall("InstallAsync").GetAwaiter().GetResult();
         Check("failed download never starts replacement", fakeUpdates.InstallCount == 0 && UpdateField<TextBlock>("status").Text.Contains("No se pudo instalar"));
-        fakeUpdates.CheckError = new UnauthorizedAccessException("La cuenta necesita acceso al proyecto privado.");
+        fakeUpdates.CheckError = new System.Net.Http.HttpRequestException("No se pudo conectar con el servicio de actualizaciones.");
         UpdateCall("CheckAsync").GetAwaiter().GetResult();
-        Check("private repository prompts for credentials inside app", UpdateField<Expander>("access").IsExpanded && UpdateField<TextBlock>("status").Text.Contains("acceso"));
-        Check("authorization failure cannot install stale release", !UpdateField<Button>("install").IsEnabled);
-        Render("updates-access", 634, 610);
-        Render("updates-access-small", 544, 490);
+        Check("network failure is explained without changing installed app", UpdateField<TextBlock>("status").Text.Contains("No se pudo comprobar") &&
+            UpdateField<TextBlock>("notes").Text.Contains("versión instalada se conserva"));
+        Check("network failure cannot install stale release", !UpdateField<Button>("install").IsEnabled && fakeUpdates.InstallCount == 0);
+        Render("updates-network-error", 634, 610);
+        Render("updates-network-error-small", 544, 490);
+        fakeUpdates.CheckError = new IOException("Las actualizaciones no están disponibles en este momento.");
+        UpdateCall("CheckAsync").GetAwaiter().GetResult();
+        Check("unavailable public update cannot install", !UpdateField<Button>("install").IsEnabled &&
+            UpdateField<TextBlock>("progressDetail").Text.Contains("no están disponibles"));
         fakeUpdates.CheckError = null;
+        UpdateCall("CheckAsync").GetAwaiter().GetResult();
+        Check("successful recheck recovers after temporary failure", UpdateField<Button>("install").IsEnabled &&
+            UpdateField<TextBlock>("status").Text.Contains("9.0.0"));
+        fakeUpdates.DownloadError = new OperationCanceledException();
+        UpdateCall("InstallAsync").GetAwaiter().GetResult();
+        Check("cancelled download preserves installed app", fakeUpdates.InstallCount == 0 && UpdateField<TextBlock>("status").Text.Contains("cancelada"));
         fakeUpdates.Update = null;
-        UpdateField<PasswordBox>("token").Password = "test-token-only";
-        UpdateCall("SaveAccessAsync").GetAwaiter().GetResult();
-        Check("saving access clears the password box", fakeUpdates.HasSavedToken && UpdateField<PasswordBox>("token").Password.Length == 0);
-        updateType.GetMethod("DeleteAccess", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(updateDialog, null);
-        Check("saved access can be removed", !fakeUpdates.HasSavedToken);
+        UpdateCall("CheckAsync").GetAwaiter().GetResult();
+        Check("no newer public release clears previous update choice", !UpdateField<Button>("install").IsEnabled);
+        Render("updates-current", 634, 610);
         updateDialog.Close();
         window.Close();
         Console.WriteLine($"UI CHECKS: {checks} passed; no windows shown or device operations started.");
@@ -229,24 +241,31 @@ public static class RenderUi
             using var output = File.Create(Path.Combine(args[0], name + ".png")); png.Save(output);
             Console.WriteLine(name + ": rendered");
         }
+        static IEnumerable<DependencyObject> VisualChildren(DependencyObject parent)
+        {
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                yield return child;
+                foreach (var descendant in VisualChildren(child)) yield return descendant;
+            }
+        }
     }
 
     private sealed class FakeUpdateService : IUpdateUiService
     {
-        public bool HasSavedToken { get; private set; }
         public int CheckCount { get; private set; }
         public int InstallCount { get; private set; }
         public UpdateInfo? Update { get; set; }
         public Exception? CheckError { get; set; }
-        public void SaveToken(string token) => HasSavedToken = token.Length > 0;
-        public void DeleteToken() => HasSavedToken = false;
+        public Exception DownloadError { get; set; } = new IOException("La descarga simulada no pasó la comprobación de integridad.");
         public Task<UpdateInfo?> CheckAsync(CancellationToken cancellationToken)
         {
             CheckCount++;
             return CheckError is null ? Task.FromResult(Update) : Task.FromException<UpdateInfo?>(CheckError);
         }
         public Task<StagedUpdate> DownloadAsync(UpdateInfo update, IProgress<UpdateProgress> progress, CancellationToken cancellationToken)
-            => Task.FromException<StagedUpdate>(new IOException("La descarga simulada no pasó la comprobación de integridad."));
+            => Task.FromException<StagedUpdate>(DownloadError);
         public void StartInstall(StagedUpdate update) => InstallCount++;
     }
 }

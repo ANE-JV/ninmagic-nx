@@ -8,9 +8,6 @@ namespace Ninmagic.Nx.App;
 
 public interface IUpdateUiService
 {
-    bool HasSavedToken { get; }
-    void SaveToken(string token);
-    void DeleteToken();
     Task<UpdateInfo?> CheckAsync(CancellationToken cancellationToken);
     Task<StagedUpdate> DownloadAsync(UpdateInfo update, IProgress<UpdateProgress> progress, CancellationToken cancellationToken);
     void StartInstall(StagedUpdate update);
@@ -18,9 +15,6 @@ public interface IUpdateUiService
 
 internal sealed class WindowsUpdateUiService(WindowsUpdateService service) : IUpdateUiService
 {
-    public bool HasSavedToken => service.HasSavedToken;
-    public void SaveToken(string token) => service.SaveToken(token);
-    public void DeleteToken() => service.DeleteToken();
     public Task<UpdateInfo?> CheckAsync(CancellationToken cancellationToken) => service.CheckAsync(cancellationToken);
     public Task<StagedUpdate> DownloadAsync(UpdateInfo update, IProgress<UpdateProgress> progress, CancellationToken cancellationToken)
         => service.DownloadAsync(update, progress, cancellationToken);
@@ -35,11 +29,6 @@ public sealed class UpdateDialog : Window
     private readonly TextBlock notes = new() { TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock progressDetail = new() { FontSize = 12, Margin = new Thickness(0, 8, 0, 12) };
     private readonly ProgressBar progress = new() { Height = 6, Minimum = 0, Maximum = 100, Visibility = Visibility.Collapsed };
-    private readonly PasswordBox token = new() { Padding = new Thickness(9), MaxLength = 512, PasswordChar = '●', Margin = new Thickness(0, 10, 0, 10) };
-    private readonly Expander access = new() { Header = "Acceso al proyecto privado en GitHub", Margin = new Thickness(0, 14, 0, 20) };
-    private readonly TextBlock accessStatus = new() { FontSize = 12, Margin = new Thickness(0, 8, 0, 0) };
-    private readonly Button saveAccess = new() { Content = "Guardar y comprobar", Margin = new Thickness(0, 0, 10, 0) };
-    private readonly Button deleteAccess = new() { Content = "Quitar acceso guardado" };
     private readonly Button check = new() { Content = "Buscar de nuevo", Margin = new Thickness(0, 0, 10, 0) };
     private readonly Button install = new() { Content = "Actualizar y reiniciar", IsEnabled = false, Margin = new Thickness(0, 0, 10, 0) };
     private readonly Button close = new() { Content = "Cerrar", MinWidth = 90 };
@@ -63,11 +52,6 @@ public sealed class UpdateDialog : Window
         progress.Foreground = (Brush)Application.Current.FindResource("Accent");
         progress.Background = new SolidColorBrush(Color.FromRgb(38, 55, 76));
         install.Style = (Style)Application.Current.FindResource("Primary");
-        token.Background = new SolidColorBrush(Color.FromRgb(11, 21, 36));
-        token.Foreground = Foreground; token.CaretBrush = Brushes.White;
-        token.BorderBrush = new SolidColorBrush(Color.FromRgb(60, 82, 109));
-        access.Foreground = Foreground;
-        System.Windows.Automation.AutomationProperties.SetName(token, "Token personal de acceso a GitHub");
         System.Windows.Automation.AutomationProperties.SetName(status, "Estado de la actualización");
         System.Windows.Automation.AutomationProperties.SetLiveSetting(status, System.Windows.Automation.AutomationLiveSetting.Polite);
         var grid = new Grid { Margin = new Thickness(26) };
@@ -81,12 +65,6 @@ public sealed class UpdateDialog : Window
         body.Children.Add(new Border { Background = new SolidColorBrush(Color.FromRgb(13, 25, 42)), CornerRadius = new CornerRadius(8), Padding = new Thickness(14), Margin = new Thickness(0, 5, 0, 14), Child = notes });
         notes.Text = "La aplicación comprueba la descarga antes de instalarla. Se cerrará y abrirá de nuevo al actualizar; tus copias de seguridad se conservan.";
         body.Children.Add(progress); body.Children.Add(progressDetail);
-        var credentials = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
-        credentials.Children.Add(new TextBlock { Text = "El proyecto ANE-JV/ninmagic-nx es privado. Introduce un token personal de GitHub de una cuenta con acceso: limita el token a este repositorio y al permiso Contents: Read-only (Contenido: solo lectura). Se guarda en el Administrador de credenciales de Windows.", FontSize = 12 });
-        credentials.Children.Add(token);
-        var accessButtons = new WrapPanel(); accessButtons.Children.Add(saveAccess); accessButtons.Children.Add(deleteAccess);
-        credentials.Children.Add(accessButtons); credentials.Children.Add(accessStatus); access.Content = credentials;
-        body.Children.Add(access);
         var scroll = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Margin = new Thickness(0, 4, 0, 10) };
         Grid.SetRow(scroll, 1); grid.Children.Add(scroll);
         var buttons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
@@ -95,13 +73,10 @@ public sealed class UpdateDialog : Window
         check.Click += async (_, _) => await CheckAsync();
         install.Click += async (_, _) => await InstallAsync();
         close.Click += (_, _) => CloseOrCancel();
-        saveAccess.Click += async (_, _) => await SaveAccessAsync();
-        deleteAccess.Click += (_, _) => DeleteAccess();
         Closing += ClosingDialog;
         Loaded += async (_, _) =>
         {
             if (started) return; started = true;
-            RefreshAccessStatus();
             if (autoCheck) await CheckAsync();
         };
     }
@@ -119,10 +94,8 @@ public sealed class UpdateDialog : Window
             notes.Text = available is null ? "Puedes seguir utilizando ninmagic-nx. Vuelve a buscar cuando haya una nueva versión." :
                 string.IsNullOrWhiteSpace(available.Notes) ? "Esta versión incluye mejoras publicadas por NinMagic." : available.Notes;
             progressDetail.Text = available is null ? "Comprobación terminada." : "Pulsa Actualizar y reiniciar para instalarla desde aquí.";
-            RefreshAccessStatus();
         }
         catch (OperationCanceledException) { status.Text = "Búsqueda cancelada."; progressDetail.Text = "La aplicación sigue como estaba."; }
-        catch (UnauthorizedAccessException ex) { status.Text = "Se necesita acceso al repositorio privado."; notes.Text = "Configura el acceso a GitHub aquí para comprobar y descargar las actualizaciones."; progressDetail.Text = ex.Message; access.IsExpanded = true; }
         catch (Exception ex) { status.Text = "No se pudo comprobar la actualización."; notes.Text = "La versión instalada se conserva. Comprueba la conexión y vuelve a intentarlo."; progressDetail.Text = ex.Message; }
         finally { FinishWork(); }
     }
@@ -152,39 +125,14 @@ public sealed class UpdateDialog : Window
             DialogResult = true;
         }
         catch (OperationCanceledException) { status.Text = "Actualización cancelada."; progressDetail.Text = "La versión instalada se conserva."; }
-        catch (UnauthorizedAccessException ex) { status.Text = "Revisa el acceso a GitHub o los permisos de la carpeta."; progressDetail.Text = ex.Message; access.IsExpanded = true; }
+        catch (UnauthorizedAccessException ex) { status.Text = "Windows no permite escribir en la carpeta de la aplicación."; progressDetail.Text = ex.Message; }
         catch (Exception ex) { status.Text = "No se pudo instalar la actualización."; progressDetail.Text = ex.Message; }
         finally { installing = false; FinishWork(); }
     }
 
-    private async Task SaveAccessAsync()
-    {
-        if (work != null) return;
-        if (string.IsNullOrWhiteSpace(token.Password)) { accessStatus.Text = "Introduce el token de acceso a este repositorio."; return; }
-        try
-        {
-            service.SaveToken(token.Password.Trim()); token.Clear(); RefreshAccessStatus();
-            await CheckAsync();
-        }
-        catch (Exception ex) { accessStatus.Text = "No se pudo guardar el acceso: " + ex.Message; }
-    }
-
-    private void DeleteAccess()
-    {
-        if (work != null) return;
-        try { service.DeleteToken(); token.Clear(); available = null; install.IsEnabled = false; RefreshAccessStatus(); }
-        catch (Exception ex) { accessStatus.Text = "No se pudo quitar el acceso: " + ex.Message; }
-    }
-
-    private void RefreshAccessStatus()
-    {
-        try { accessStatus.Text = service.HasSavedToken ? "Acceso guardado en este usuario de Windows. Puedes sustituirlo o quitarlo aquí." : "No hay un acceso guardado en este usuario de Windows."; }
-        catch (Exception ex) { accessStatus.Text = "No se pudo consultar el acceso guardado: " + ex.Message; }
-    }
-
     private void SetBusy(bool busy)
     {
-        check.IsEnabled = saveAccess.IsEnabled = deleteAccess.IsEnabled = token.IsEnabled = !busy;
+        check.IsEnabled = !busy;
         install.IsEnabled = !busy && available != null;
         close.IsEnabled = !installing; close.Content = busy ? "Cancelar" : "Cerrar";
         progress.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;

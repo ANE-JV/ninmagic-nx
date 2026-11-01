@@ -2,21 +2,21 @@
 
 Aplicación portable en español para Windows 10/11 de 64 bits. Permite guardar una copia verificada de una microSD con Atmosphère y emuMMC en el PC y restaurarla en una tarjeta de mayor capacidad, ampliando la partición de archivos.
 
-**Versión 1.6.0 para Windows: actualizaciones desde la aplicación.** Conserva el motor de migración de la 1.5.2, cuyo funcionamiento confirmó el usuario en su prueba. Esta confirmación corresponde a ese caso; no certifica todos los lectores o tarjetas. Conserva la original hasta verificar la nueva en tu consola. Las versiones para Mac y Linux no forman parte de esta entrega.
+**Versión 1.6.1 para Windows: actualizaciones públicas sin token.** Conserva el motor de migración de la 1.5.2, cuyo funcionamiento confirmó el usuario en su prueba. Esta confirmación corresponde a ese caso; no certifica todos los lectores o tarjetas. Conserva la original hasta verificar la nueva en tu consola. Las versiones para Mac y Linux no forman parte de esta entrega.
 
 ## Descargar y usar
 
-El ejecutable portable `ninmagic-nx.exe` se encuentra en [Releases](https://github.com/ANE-JV/ninmagic-nx/releases). El repositorio es privado: debes iniciar sesión con una cuenta autorizada para descargarlo. No necesitas instalar .NET. Las copias y restauraciones funcionan sin Internet. El botón de actualización contacta con GitHub para consultar versiones y descargar el ejecutable; no envía archivos, juegos, manifiestos ni registros de tus tarjetas.
+El ejecutable portable `ninmagic-nx.exe` se encuentra en [Releases](https://github.com/ANE-JV/ninmagic-nx/releases). El repositorio es público y la descarga no requiere cuenta ni token. No necesitas instalar .NET. Las copias y restauraciones funcionan sin Internet. El botón de actualización contacta con GitHub para consultar versiones y descargar el ejecutable; no envía archivos, juegos, manifiestos ni registros de tus tarjetas.
 
 ## Actualizar desde la aplicación
 
-Esta primera versión con actualizador se descarga y abre una vez. Después, pulsa **Buscar actualizaciones** en la parte inferior de la ventana. La aplicación muestra la versión nueva y sus novedades antes de descargarla. Al confirmar la instalación, verifica el archivo, cierra la instancia actual, sustituye el ejecutable y vuelve a abrirlo. Conserva el ejecutable anterior como respaldo. Las carpetas de copias y los datos de las microSD no forman parte de la actualización.
+Pulsa **Buscar actualizaciones** en la parte inferior de la ventana. La aplicación muestra la versión nueva y sus novedades antes de descargarla. Al confirmar la instalación, verifica el archivo, cierra la instancia actual, sustituye el ejecutable y vuelve a abrirlo. Conserva el ejecutable anterior como respaldo. Si ya utilizas la 1.6.0, pulsa **Buscar de nuevo** para obtener esta versión sin introducir un token. Las versiones anteriores a 1.6.0 requieren descargar y abrir el ejecutable una vez. Las carpetas de copias y los datos de las microSD no forman parte de la actualización.
 
 Mientras haya una copia, restauración, comprobación o búsqueda de tarjetas en curso, la actualización no puede iniciarse. Tampoco se puede iniciar una operación con tarjetas durante una actualización. Si la descarga falla o la cancelas, se conserva la versión actual.
 
-Como este repositorio es privado, configura el acceso la primera vez desde el diálogo de actualización: utiliza un token de GitHub con permiso de lectura de **Contents** solamente para **ANE-JV/ninmagic-nx**. La cuenta debe tener acceso al repositorio. El token se guarda en el Administrador de credenciales de Windows para tu usuario, no se incluye en el ejecutable ni en los registros. Puedes quitarlo desde el mismo diálogo. No pegues el token en un chat ni lo subas al repositorio.
+Las consultas y descargas son públicas y anónimas. La versión 1.6.1 elimina el formulario de credenciales y no lee ni guarda tokens. Si la 1.6.0 dejó un acceso guardado, la 1.6.1 lo ignora; puedes eliminar esa entrada desde el Administrador de credenciales de Windows.
 
-El botón solo ofrece versiones estables de Windows más recientes. Si no hay novedades, lo indica sin reinstalar la aplicación. Los errores de conexión o de autorización no se presentan como «estás actualizado». La primera versión para Mac, Linux y sus futuros paquetes quedan fuera de este canal.
+El botón solo ofrece versiones estables de Windows más recientes. Si no hay novedades, lo indica sin reinstalar la aplicación. Los errores de conexión, disponibilidad o límite de consultas no se presentan como «estás actualizado». La primera versión para Mac, Linux y sus futuros paquetes quedan fuera de este canal.
 
 1. Apaga completamente la consola. Conecta la microSD original al PC mediante un lector USB/SD/MMC. No abras ni modifiques sus archivos durante la copia.
 2. Abre `ninmagic-nx.exe` y pulsa **Abrir como administrador**. Windows solicitará permiso para acceder a las tarjetas. El ejecutable no está firmado con un certificado comercial.

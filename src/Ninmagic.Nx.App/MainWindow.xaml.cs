@@ -232,7 +232,7 @@ public partial class MainWindow : Window
         BeginProgress(name);
         try
         {
-            Log("Inicio de operación ninmagic-nx 1.6.0");
+            Log("Inicio de operación ninmagic-nx 1.6.1");
             await action(operation.Token);
         }
         catch (OperationCanceledException)
@@ -427,7 +427,7 @@ public partial class MainWindow : Window
         {
             Directory.CreateDirectory(logFolder);
             logFile = Path.Combine(logFolder, $"ninmagic-nx-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
-            File.AppendAllText(logFile, $"{DateTimeOffset.Now:O} Sesión ninmagic-nx 1.6.0{Environment.NewLine}");
+            File.AppendAllText(logFile, $"{DateTimeOffset.Now:O} Sesión ninmagic-nx 1.6.1{Environment.NewLine}");
         }
         catch (IOException) { logFile = ""; }
         catch (UnauthorizedAccessException) { logFile = ""; }
